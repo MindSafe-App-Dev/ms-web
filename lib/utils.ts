@@ -119,7 +119,7 @@ export function downloadFile(data: string, filename: string, mimeType: string = 
 }
 
 // Export contacts/calls to CSV
-export function exportToCSV<T extends Record<string, unknown>>(
+export function exportToCSV<T extends object>(
     data: T[],
     headers: string[],
     keys: (keyof T)[],
