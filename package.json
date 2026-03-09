@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "setup:billing": "node scripts/setup-appwrite-billing-collections.mjs"
   },
   "dependencies": {
     "@paypal/react-paypal-js": "^8.9.2",

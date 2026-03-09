@@ -45,7 +45,7 @@ export default function DeviceOptionsPage() {
             return;
         }
 
-        const trialResult = await consumeTrialAccess(user.$id, deviceId);
+        const trialResult = await consumeTrialAccess(user.$id, deviceId, feature.id);
         if (trialResult.allowed) {
             showInfo('Trial Access Used', `${trialResult.usedCount}/${trialResult.maxUses} used. ${trialResult.remaining} remaining this month.`);
             router.push(`/device/${feature.id}?name=${encodeURIComponent(deviceName)}&deviceId=${deviceId}`);
@@ -163,3 +163,4 @@ export default function DeviceOptionsPage() {
         </div>
     );
 }
+

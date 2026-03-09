@@ -1,19 +1,17 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { signOut } from '@/lib/appwrite';
 import { Home, BookOpen, Cloud, User, LogOut, Loader2, Menu, X, BadgePercent } from 'lucide-react';
-import { useState } from 'react';
 
-const navItems = [
+const baseNavItems = [
     { href: '/home', label: 'Home', icon: Home },
     { href: '/tutorial', label: 'Tutorial', icon: BookOpen },
     { href: '/cloud', label: 'Cloud', icon: Cloud },
     { href: '/profile', label: 'Profile', icon: User },
-    { href: '/coupon-management', label: 'Coupons', icon: BadgePercent },
 ];
 
 export default function DashboardLayout({
@@ -26,6 +24,14 @@ export default function DashboardLayout({
     const pathname = usePathname();
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
+    const adminEmail = process.env.NEXT_PUBLIC_COUPON_ADMIN_EMAIL || '';
+    const isCouponAdmin = typeof window !== 'undefined' && localStorage.getItem('ms_coupon_admin') === '1' && !!user?.email && user.email === adminEmail;
+
+    const navItems = useMemo(() => {
+        if (!isCouponAdmin) return baseNavItems;
+        return [...baseNavItems, { href: '/coupon-management', label: 'Coupons', icon: BadgePercent }];
+    }, [isCouponAdmin]);
+
     useEffect(() => {
         if (!loading && !isLogged) {
             router.replace('/sign-in');
@@ -37,6 +43,7 @@ export default function DashboardLayout({
             await signOut();
             setUser(null);
             setIsLogged(false);
+            localStorage.removeItem('ms_coupon_admin');
             router.replace('/sign-in');
         } catch (error) {
             console.error('Logout error:', error);
@@ -57,7 +64,6 @@ export default function DashboardLayout({
 
     return (
         <div className="min-h-screen flex">
-            {/* Mobile Menu Button */}
             <button
                 onClick={() => setSidebarOpen(!sidebarOpen)}
                 className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-xl ms-card"
@@ -65,7 +71,6 @@ export default function DashboardLayout({
                 {sidebarOpen ? <X className="w-6 h-6 text-white" /> : <Menu className="w-6 h-6 text-white" />}
             </button>
 
-            {/* Sidebar Overlay */}
             {sidebarOpen && (
                 <div
                     className="lg:hidden fixed inset-0 bg-black/50 z-40"
@@ -73,13 +78,11 @@ export default function DashboardLayout({
                 />
             )}
 
-            {/* Sidebar */}
             <aside
                 className={`fixed lg:static inset-y-0 left-0 z-40 w-64 transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
                     }`}
             >
                 <div className="h-full flex flex-col bg-[#1a0b2e] border-r border-purple-500/20 p-4">
-                    {/* Logo */}
                     <div className="flex items-center gap-3 px-2 py-4 mb-6">
                         <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center">
                             <span className="text-white font-bold">MS</span>
@@ -87,7 +90,6 @@ export default function DashboardLayout({
                         <span className="text-xl font-bold text-white">MindSafe</span>
                     </div>
 
-                    {/* Navigation */}
                     <nav className="flex-1 space-y-2">
                         {navItems.map((item) => {
                             const isActive = pathname === item.href;
@@ -110,7 +112,6 @@ export default function DashboardLayout({
                         })}
                     </nav>
 
-                    {/* User Section */}
                     <div className="pt-4 border-t border-purple-500/20">
                         <div className="flex items-center gap-3 px-2 py-3 mb-2">
                             <div className="w-10 h-10 rounded-full bg-purple-500 flex items-center justify-center">
@@ -135,7 +136,6 @@ export default function DashboardLayout({
                 </div>
             </aside>
 
-            {/* Main Content */}
             <main className="flex-1 min-h-screen lg:ml-0 overflow-x-hidden">
                 <div className="p-4 lg:p-8 pt-16 lg:pt-8">
                     {children}
@@ -144,4 +144,3 @@ export default function DashboardLayout({
         </div>
     );
 }
-

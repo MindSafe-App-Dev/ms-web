@@ -17,6 +17,9 @@ export default function SignInPage() {
     const [showPassword, setShowPassword] = useState(false);
     const [isSubmitting, setSubmitting] = useState(false);
 
+    const adminEmail = process.env.NEXT_PUBLIC_COUPON_ADMIN_EMAIL || '';
+    const adminPassword = process.env.NEXT_PUBLIC_COUPON_ADMIN_PASSWORD || '';
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
@@ -32,6 +35,13 @@ export default function SignInPage() {
             const result = await getCurrentUser();
             setUser(result);
             setIsLogged(true);
+
+            const isCouponAdmin = form.email === adminEmail && form.password === adminPassword;
+            if (isCouponAdmin) {
+                localStorage.setItem('ms_coupon_admin', '1');
+            } else {
+                localStorage.removeItem('ms_coupon_admin');
+            }
             showSuccess('Welcome Back!', 'You have been signed in successfully');
             router.replace('/home');
         } catch (error) {
@@ -130,3 +140,5 @@ export default function SignInPage() {
         </div>
     );
 }
+
+

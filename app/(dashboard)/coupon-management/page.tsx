@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { useNotification } from '@/context/NotificationProvider';
+import { useGlobalContext } from '@/context/GlobalProvider';
 import { createCoupon, deleteCoupon, getCoupons, updateCoupon, Coupon } from '@/lib/appwrite';
 import { BadgePercent, Loader2, Trash2, Save } from 'lucide-react';
 
 export default function CouponManagementPage() {
     const { showSuccess, showError, showInfo } = useNotification();
+    const { user } = useGlobalContext();
 
     const [coupons, setCoupons] = useState<Coupon[]>([]);
     const [loading, setLoading] = useState(true);
@@ -20,6 +22,9 @@ export default function CouponManagementPage() {
         expires_at: '',
     });
 
+    const adminEmail = process.env.NEXT_PUBLIC_COUPON_ADMIN_EMAIL || '';
+    const isCouponAdmin = typeof window !== 'undefined' && localStorage.getItem('ms_coupon_admin') === '1' && user?.email === adminEmail;
+
     const refreshCoupons = async () => {
         setLoading(true);
         const data = await getCoupons();
@@ -28,8 +33,9 @@ export default function CouponManagementPage() {
     };
 
     useEffect(() => {
+        if (!isCouponAdmin) return;
         refreshCoupons();
-    }, []);
+    }, [isCouponAdmin]);
 
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -77,6 +83,15 @@ export default function CouponManagementPage() {
             showError('Delete Failed', 'Could not delete coupon.');
         }
     };
+
+    if (!isCouponAdmin) {
+        return (
+            <div className="max-w-3xl mx-auto ms-card p-8 text-center">
+                <h1 className="text-2xl font-bold text-white mb-2">Restricted Area</h1>
+                <p className="text-gray-400">Coupon management is available only for admin login credentials.</p>
+            </div>
+        );
+    }
 
     return (
         <div className="max-w-6xl mx-auto">
