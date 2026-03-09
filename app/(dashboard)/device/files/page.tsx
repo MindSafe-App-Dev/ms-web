@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
+import { useGlobalContext } from '@/context/GlobalProvider';
+import { consumeTrialAccess } from '@/lib/appwrite';
 import { initSocket, sendCommand, onResult, COMMANDS, disconnectSocket, SocketResult } from '@/lib/socket';
 import { getFileIcon, formatFileSize } from '@/lib/utils';
 import { Folder, ArrowLeft, RefreshCw, ChevronRight, Download, FolderOpen, Image, HardDrive, FileText, Music, Video, Camera } from 'lucide-react';
@@ -28,7 +30,8 @@ const quickAccessPaths = [
 export default function FilesPage() {
     const searchParams = useSearchParams();
     const router = useRouter();
-    const { showSuccess, showError, showInfo, showTimeout, showConnection } = useNotification();
+    const { showSuccess, showError, showInfo, showTimeout, showConnection, showWarning, showPremium } = useNotification();
+    const { user } = useGlobalContext();
 
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
@@ -37,7 +40,26 @@ export default function FilesPage() {
     const [files, setFiles] = useState<FileItem[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
+    const [trialConsumed, setTrialConsumed] = useState(false);
 
+    const ensureTrialOnFirstUse = async () => {
+        if (trialConsumed) return true;
+        if (!user?.$id || !deviceId) {
+            showWarning('Trial Unavailable', 'Missing device or user details.');
+            return false;
+        }
+
+        const trial = await consumeTrialAccess(user.$id, deviceId, 'files');
+        if (!trial.allowed) {
+            showWarning('Trial Limit Reached', trial.message);
+            showPremium('Premium Feature', 'File Manager trial limit reached. Upgrade to continue.', () => router.push('/premium'));
+            return false;
+        }
+
+        setTrialConsumed(true);
+        showInfo('Trial Access Used', `${trial.usedCount}/${trial.maxUses} used for File Manager this month.`);
+        return true;
+    };
     useEffect(() => {
         initSocket(deviceId);
         showConnection(true, 'Connected to device');
@@ -87,7 +109,9 @@ export default function FilesPage() {
         return () => disconnectSocket();
     }, [deviceId]);
 
-    const browseDirectory = useCallback((path: string) => {
+    async function browseDirectory(path: string) {
+        const canUse = await ensureTrialOnFirstUse();
+        if (!canUse) return;
         setFiles([]);
         setIsLoading(true);
         setCurrentPath(path);
@@ -103,9 +127,11 @@ export default function FilesPage() {
                 showTimeout('Request Timeout', 'Operation took too long', () => browseDirectory(path));
             }
         }, 120000);
-    }, [deviceId, isLoading]);
+    }
 
-    const downloadFile = (filePath: string, fileName: string) => {
+    const downloadFile = async (filePath: string, fileName: string) => {
+        const canUse = await ensureTrialOnFirstUse();
+        if (!canUse) return;
         setIsDownloading(true);
         showInfo('Downloading', `Please wait while we download ${fileName}...`);
 
@@ -260,3 +286,5 @@ export default function FilesPage() {
         </div>
     );
 }
+
+

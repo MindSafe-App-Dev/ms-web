@@ -1,15 +1,18 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
+import { useGlobalContext } from '@/context/GlobalProvider';
+import { consumeTrialAccess } from '@/lib/appwrite';
 import { initSocket, sendCommand, onResult, COMMANDS, disconnectSocket } from '@/lib/socket';
 import { Camera as CameraIcon, ArrowLeft, Download, Share2, CheckCircle } from 'lucide-react';
 
 export default function CameraPage() {
     const searchParams = useSearchParams();
     const router = useRouter();
-    const { showSuccess, showError, showInfo } = useNotification();
+    const { showSuccess, showError, showInfo, showWarning, showPremium } = useNotification();
+    const { user } = useGlobalContext();
 
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
@@ -18,7 +21,26 @@ export default function CameraPage() {
     const [isCapturing, setIsCapturing] = useState(false);
     const [capturedImage, setCapturedImage] = useState<string | null>(null);
     const [isSaved, setIsSaved] = useState(false);
+    const [trialConsumed, setTrialConsumed] = useState(false);
 
+    const ensureTrialOnFirstUse = async () => {
+        if (trialConsumed) return true;
+        if (!user?.$id || !deviceId) {
+            showWarning('Trial Unavailable', 'Missing device or user details.');
+            return false;
+        }
+
+        const trial = await consumeTrialAccess(user.$id, deviceId, 'camera');
+        if (!trial.allowed) {
+            showWarning('Trial Limit Reached', trial.message);
+            showPremium('Premium Feature', 'Camera trial limit reached. Upgrade to continue.', () => router.push('/premium'));
+            return false;
+        }
+
+        setTrialConsumed(true);
+        showInfo('Trial Access Used', `${trial.usedCount}/${trial.maxUses} used for Camera this month.`);
+        return true;
+    };
     useEffect(() => {
         // Initialize socket connection
         initSocket(deviceId);
@@ -38,7 +60,9 @@ export default function CameraPage() {
         };
     }, [deviceId]);
 
-    const handleCapture = () => {
+    const handleCapture = async () => {
+        const canUse = await ensureTrialOnFirstUse();
+        if (!canUse) return;
         setIsCapturing(true);
         showInfo('Capturing...', 'Please wait while we capture the photo');
 
@@ -209,3 +233,5 @@ export default function CameraPage() {
         </div>
     );
 }
+
+

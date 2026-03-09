@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "setup:billing": "node scripts/setup-appwrite-billing-collections.mjs"
+    "setup:billing": "node scripts/setup-appwrite-billing-collections.mjs",
+    "seed:coupons": "node scripts/seed-coupons.mjs"
   },
   "dependencies": {
     "@paypal/react-paypal-js": "^8.9.2",

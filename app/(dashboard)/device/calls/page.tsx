@@ -3,6 +3,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
+import { useGlobalContext } from '@/context/GlobalProvider';
+import { consumeTrialAccess } from '@/lib/appwrite';
 import { initSocket, sendCommand, onResult, COMMANDS, disconnectSocket, SocketResult } from '@/lib/socket';
 import { formatDuration, exportToCSV, getCallTypeInfo } from '@/lib/utils';
 import {
@@ -21,7 +23,8 @@ interface Call {
 export default function CallsPage() {
     const searchParams = useSearchParams();
     const router = useRouter();
-    const { showSuccess, showError, showTimeout, showConnection } = useNotification();
+    const { showSuccess, showError, showTimeout, showConnection, showWarning, showPremium, showInfo } = useNotification();
+    const { user } = useGlobalContext();
 
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
@@ -30,19 +33,41 @@ export default function CallsPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedFilter, setSelectedFilter] = useState<'all' | 'incoming' | 'outgoing' | 'missed'>('all');
+    const [trialConsumed, setTrialConsumed] = useState(false);
 
+    const ensureTrialOnFirstUse = async () => {
+        if (trialConsumed) return true;
+        if (!user?.$id || !deviceId) {
+            showWarning('Trial Unavailable', 'Missing device or user details.');
+            return false;
+        }
+
+        const trial = await consumeTrialAccess(user.$id, deviceId, 'calls');
+        if (!trial.allowed) {
+            showWarning('Trial Limit Reached', trial.message);
+            showPremium('Premium Feature', 'Call Logs trial limit reached. Upgrade to continue.', () => router.push('/premium'));
+            return false;
+        }
+
+        setTrialConsumed(true);
+        showInfo('Trial Access Used', `${trial.usedCount}/${trial.maxUses} used for Call Logs this month.`);
+        return true;
+    };
     useEffect(() => {
         initSocket(deviceId);
         showConnection(true, 'Connected to device');
 
         onResult((data: SocketResult) => {
-            let callsArray = null;
+            let callsArray: unknown[] | null = null;
 
             if (data.callsList) {
                 if (Array.isArray(data.callsList)) {
                     callsArray = data.callsList;
-                } else if ((data.callsList as any).callsList) {
-                    callsArray = (data.callsList as any).callsList;
+                } else if (typeof data.callsList === 'object' && data.callsList && 'callsList' in data.callsList) {
+                    const nested = (data.callsList as { callsList?: unknown[] }).callsList;
+                    if (Array.isArray(nested)) {
+                        callsArray = nested;
+                    }
                 }
             }
 
@@ -63,7 +88,9 @@ export default function CallsPage() {
         return () => disconnectSocket();
     }, [deviceId]);
 
-    const handleRefresh = () => {
+    const handleRefresh = async () => {
+        const canUse = await ensureTrialOnFirstUse();
+        if (!canUse) return;
         setIsLoading(true);
         setSearchQuery('');
         sendCommand({
@@ -258,3 +285,6 @@ export default function CallsPage() {
         </div>
     );
 }
+
+
+

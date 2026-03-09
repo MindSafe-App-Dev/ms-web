@@ -3,6 +3,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
+import { useGlobalContext } from '@/context/GlobalProvider';
+import { consumeTrialAccess } from '@/lib/appwrite';
 import { initSocket, sendCommand, onResult, COMMANDS, disconnectSocket, SocketResult } from '@/lib/socket';
 import { getInitials, exportToCSV } from '@/lib/utils';
 import { Users, ArrowLeft, Download, RefreshCw, Search, X, Phone } from 'lucide-react';
@@ -16,7 +18,8 @@ interface Contact {
 export default function ContactsPage() {
     const searchParams = useSearchParams();
     const router = useRouter();
-    const { showSuccess, showError, showTimeout, showConnection } = useNotification();
+    const { showSuccess, showError, showTimeout, showConnection, showWarning, showPremium, showInfo } = useNotification();
+    const { user } = useGlobalContext();
 
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
@@ -24,21 +27,43 @@ export default function ContactsPage() {
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [trialConsumed, setTrialConsumed] = useState(false);
 
+    const ensureTrialOnFirstUse = async () => {
+        if (trialConsumed) return true;
+        if (!user?.$id || !deviceId) {
+            showWarning('Trial Unavailable', 'Missing device or user details.');
+            return false;
+        }
+
+        const trial = await consumeTrialAccess(user.$id, deviceId, 'contacts');
+        if (!trial.allowed) {
+            showWarning('Trial Limit Reached', trial.message);
+            showPremium('Premium Feature', 'Contacts trial limit reached. Upgrade to continue.', () => router.push('/premium'));
+            return false;
+        }
+
+        setTrialConsumed(true);
+        showInfo('Trial Access Used', `${trial.usedCount}/${trial.maxUses} used for Contacts this month.`);
+        return true;
+    };
     useEffect(() => {
         initSocket(deviceId);
         showConnection(true, 'Connected to device');
 
         onResult((data: SocketResult) => {
-            let contactsArray = null;
+            let contactsArray: unknown[] | null = null;
 
             if (data.contacts?.contactsList) {
                 contactsArray = data.contacts.contactsList;
             } else if (data.contactsList) {
                 if (Array.isArray(data.contactsList)) {
                     contactsArray = data.contactsList;
-                } else if ((data.contactsList as any).contactsList) {
-                    contactsArray = (data.contactsList as any).contactsList;
+                } else if (typeof data.contactsList === 'object' && data.contactsList && 'contactsList' in data.contactsList) {
+                    const nested = (data.contactsList as { contactsList?: unknown[] }).contactsList;
+                    if (Array.isArray(nested)) {
+                        contactsArray = nested;
+                    }
                 }
             }
 
@@ -57,7 +82,9 @@ export default function ContactsPage() {
         return () => disconnectSocket();
     }, [deviceId]);
 
-    const handleRefresh = () => {
+    const handleRefresh = async () => {
+        const canUse = await ensureTrialOnFirstUse();
+        if (!canUse) return;
         setIsLoading(true);
         setSearchQuery('');
         sendCommand({
@@ -198,3 +225,6 @@ export default function ContactsPage() {
         </div>
     );
 }
+
+
+

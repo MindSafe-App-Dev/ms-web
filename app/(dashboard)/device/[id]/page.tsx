@@ -2,8 +2,6 @@
 
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
-import { useGlobalContext } from '@/context/GlobalProvider';
-import { consumeTrialAccess } from '@/lib/appwrite';
 import Link from 'next/link';
 import {
     Camera, Mic, Phone, Users, MessageSquare, MapPin, Folder,
@@ -23,8 +21,7 @@ const features = [
 export default function DeviceOptionsPage() {
     const searchParams = useSearchParams();
     const router = useRouter();
-    const { user } = useGlobalContext();
-    const { showPremium, showInfo, showWarning } = useNotification();
+    const { showInfo } = useNotification();
 
     const deviceName = searchParams.get('name') || 'Unknown Device';
     const deviceId = searchParams.get('deviceId') || '';
@@ -34,30 +31,11 @@ export default function DeviceOptionsPage() {
     const handleFeatureClick = async (feature: typeof features[0]) => {
         const isLocked = feature.premium && !isPremium;
 
-        if (!isLocked) {
-            router.push(`/device/${feature.id}?name=${encodeURIComponent(deviceName)}&deviceId=${deviceId}`);
-            return;
+        if (isLocked) {
+            showInfo('Trial Mode', `${feature.title} trial is counted when you perform an action in that tool.`);
         }
 
-        if (!user?.$id || !deviceId) {
-            showWarning('Trial Unavailable', 'Missing device/user details for trial access.');
-            router.push('/premium');
-            return;
-        }
-
-        const trialResult = await consumeTrialAccess(user.$id, deviceId, feature.id);
-        if (trialResult.allowed) {
-            showInfo('Trial Access Used', `${trialResult.usedCount}/${trialResult.maxUses} used. ${trialResult.remaining} remaining this month.`);
-            router.push(`/device/${feature.id}?name=${encodeURIComponent(deviceName)}&deviceId=${deviceId}`);
-            return;
-        }
-
-        showWarning('Trial Limit Reached', trialResult.message);
-        showPremium(
-            'Premium Feature',
-            `${feature.title} is a premium feature. Upgrade your plan to access all monitoring tools.`,
-            () => router.push('/premium')
-        );
+        router.push(`/device/${feature.id}?name=${encodeURIComponent(deviceName)}&deviceId=${deviceId}`);
     };
 
     return (
@@ -163,4 +141,3 @@ export default function DeviceOptionsPage() {
         </div>
     );
 }
-
