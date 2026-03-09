@@ -70,17 +70,17 @@ async function main() {
   await createAttribute(couponCollectionId, 'string', { key: 'description', size: 512, required: false });
   await createAttribute(couponCollectionId, 'string', { key: 'discount_type', size: 16, required: true });
   await createAttribute(couponCollectionId, 'float', { key: 'discount_value', required: true, min: 0, max: 1000000 });
-  await createAttribute(couponCollectionId, 'boolean', { key: 'is_active', required: true, default: true });
+  await createAttribute(couponCollectionId, 'boolean', { key: 'is_active', required: true });
   await createAttribute(couponCollectionId, 'datetime', { key: 'expires_at', required: false });
-  await createAttribute(couponCollectionId, 'integer', { key: 'max_redemptions', required: false, min: 0, max: 1000000000, default: 0 });
-  await createAttribute(couponCollectionId, 'integer', { key: 'redemption_count', required: false, min: 0, max: 1000000000, default: 0 });
+  await createAttribute(couponCollectionId, 'integer', { key: 'max_redemptions', required: false, min: 0, max: 1000000000 });
+  await createAttribute(couponCollectionId, 'integer', { key: 'redemption_count', required: false, min: 0, max: 1000000000 });
 
   await createAttribute(trialCollectionId, 'string', { key: 'client_id', size: 64, required: true });
   await createAttribute(trialCollectionId, 'string', { key: 'device_id', size: 128, required: true });
   await createAttribute(trialCollectionId, 'string', { key: 'feature_id', size: 64, required: true });
   await createAttribute(trialCollectionId, 'string', { key: 'month_key', size: 7, required: true });
-  await createAttribute(trialCollectionId, 'integer', { key: 'used_count', required: true, min: 0, max: 1000, default: 0 });
-  await createAttribute(trialCollectionId, 'integer', { key: 'max_uses', required: true, min: 1, max: 1000, default: 3 });
+  await createAttribute(trialCollectionId, 'integer', { key: 'used_count', required: true, min: 0, max: 1000 });
+  await createAttribute(trialCollectionId, 'integer', { key: 'max_uses', required: true, min: 1, max: 1000 });
   await createAttribute(trialCollectionId, 'datetime', { key: 'last_used_at', required: false });
 
   await createIndex(couponCollectionId, 'coupon_code_unique', 'key', ['code'], ['ASC']);
@@ -93,3 +93,4 @@ main().catch((err) => {
   console.error(err.message);
   process.exit(1);
 });
+

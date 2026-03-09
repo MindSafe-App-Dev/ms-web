@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { useNotification } from '@/context/NotificationProvider';
@@ -15,8 +15,8 @@ import {
 } from '@/lib/appwrite';
 import { ArrowLeft, Crown, Check, Zap, Shield, Clock, Cloud, Smartphone, ChevronDown, Loader2, CreditCard, ExternalLink } from 'lucide-react';
 
-const PAYPAL_CLIENT_ID = "AWW4B0m2iwsdPu5R2Thbdhm6pq0e6NB73Z5FLEBjbJn-pWGgwj8rRoqi7yTDJuEVmNOdmkAZZDtMZdat";
-const PAYPAL_SECRET = "EJUXp2Ipo4zkORbKC2uac24CZKy_SGh1xKHtk6S6ZCvIHYG99vDohRCqqW15Jm0b5apB8zeD-PiItxPi";
+const PAYPAL_CLIENT_ID = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "AWW4B0m2iwsdPu5R2Thbdhm6pq0e6NB73Z5FLEBjbJn-pWGgwj8rRoqi7yTDJuEVmNOdmkAZZDtMZdat";
+const PAYPAL_SECRET = process.env.NEXT_PUBLIC_PAYPAL_SECRET || "EJUXp2Ipo4zkORbKC2uac24CZKy_SGh1xKHtk6S6ZCvIHYG99vDohRCqqW15Jm0b5apB8zeD-PiItxPi";
 const PAYPAL_API = "https://api-m.sandbox.paypal.com";
 
 interface Plan {
@@ -147,7 +147,7 @@ export default function PremiumPage() {
         showSuccess('Coupon Applied', `You saved $${result.discountAmount.toFixed(2)}.`);
     };
 
-    const handlePaymentSuccess = useCallback(async () => {
+    async function handlePaymentSuccess() {
         if (!selectedDevice || !selectedPlan || !user) return;
 
         setProcessing(true);
@@ -181,7 +181,7 @@ export default function PremiumPage() {
         } finally {
             setProcessing(false);
         }
-    }, [selectedDevice, selectedPlan, user, finalAmount, couponResult, showSuccess, showError, router]);
+    }
 
     const initiatePayPalPayment = async () => {
         if (!selectedDevice || !selectedPlan) {
@@ -191,6 +191,12 @@ export default function PremiumPage() {
 
         setProcessing(true);
         showInfo('Connecting to PayPal...', 'Please wait while we set up your payment.');
+
+        if (!PAYPAL_CLIENT_ID || !PAYPAL_SECRET) {
+            showError('Payment Failed', 'Missing PayPal configuration in environment.');
+            setProcessing(false);
+            return;
+        }
 
         try {
             const authResponse = await fetch(`${PAYPAL_API}/v1/oauth2/token`, {
@@ -203,7 +209,7 @@ export default function PremiumPage() {
             });
 
             if (!authResponse.ok) {
-                throw new Error('Failed to authenticate with PayPal');
+                throw new Error('Failed to authenticate with PayPal. (' + authResponse.status + ')');
             }
 
             const authData = await authResponse.json();
@@ -482,6 +488,9 @@ export default function PremiumPage() {
         </div>
     );
 }
+
+
+
 
 
 
