@@ -1,13 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { useNotification } from '@/context/NotificationProvider';
-import { createPayment, updateChild, getAllChild, Child } from '@/lib/appwrite';
+import {
+    createPayment,
+    updateChild,
+    getAllChild,
+    Child,
+    validateCouponCode,
+    incrementCouponRedemption,
+    CouponValidationResult,
+} from '@/lib/appwrite';
 import { ArrowLeft, Crown, Check, Zap, Shield, Clock, Cloud, Smartphone, ChevronDown, Loader2, CreditCard, ExternalLink } from 'lucide-react';
 
-// PayPal Sandbox Credentials (replace with production for live)
 const PAYPAL_CLIENT_ID = "AWW4B0m2iwsdPu5R2Thbdhm6pq0e6NB73Z5FLEBjbJn-pWGgwj8rRoqi7yTDJuEVmNOdmkAZZDtMZdat";
 const PAYPAL_SECRET = "EJUXp2Ipo4zkORbKC2uac24CZKy_SGh1xKHtk6S6ZCvIHYG99vDohRCqqW15Jm0b5apB8zeD-PiItxPi";
 const PAYPAL_API = "https://api-m.sandbox.paypal.com";
@@ -65,13 +72,17 @@ export default function PremiumPage() {
     const [devices, setDevices] = useState<Child[]>([]);
     const [selectedDevice, setSelectedDevice] = useState<Child | null>(null);
     const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+    const [couponCode, setCouponCode] = useState('');
+    const [couponResult, setCouponResult] = useState<CouponValidationResult | null>(null);
     const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState(false);
     const [showDeviceDropdown, setShowDeviceDropdown] = useState(false);
     const [paymentWindow, setPaymentWindow] = useState<Window | null>(null);
 
-    // Get device from URL params if available
     const deviceIdFromUrl = searchParams.get('deviceId');
+
+    const baseAmount = selectedPlan?.price || 0;
+    const finalAmount = couponResult?.valid ? couponResult.finalAmount : baseAmount;
 
     useEffect(() => {
         const fetchDevices = async () => {
@@ -98,12 +109,11 @@ export default function PremiumPage() {
         fetchDevices();
     }, [user?.$id, deviceIdFromUrl]);
 
-    // Listen for payment completion message from popup
     useEffect(() => {
         const handleMessage = async (event: MessageEvent) => {
             if (event.data?.type === 'PAYPAL_SUCCESS' && event.data?.orderId) {
                 paymentWindow?.close();
-                await handlePaymentSuccess(event.data.orderId);
+                await handlePaymentSuccess();
             } else if (event.data?.type === 'PAYPAL_CANCEL') {
                 paymentWindow?.close();
                 setProcessing(false);
@@ -113,9 +123,31 @@ export default function PremiumPage() {
 
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
-    }, [paymentWindow, selectedDevice, selectedPlan]);
+    }, [paymentWindow, handlePaymentSuccess, showWarning]);
 
-    const handlePaymentSuccess = async (orderId: string) => {
+    const handleApplyCoupon = async () => {
+        if (!selectedPlan) {
+            showWarning('Select Plan First', 'Please choose a plan before applying coupon.');
+            return;
+        }
+
+        if (!couponCode.trim()) {
+            showWarning('Missing Coupon', 'Enter a coupon code to apply discount.');
+            return;
+        }
+
+        const result = await validateCouponCode(couponCode, selectedPlan.price);
+        if (!result.valid) {
+            setCouponResult(null);
+            showError('Invalid Coupon', result.message);
+            return;
+        }
+
+        setCouponResult(result);
+        showSuccess('Coupon Applied', `You saved $${result.discountAmount.toFixed(2)}.`);
+    };
+
+    const handlePaymentSuccess = useCallback(async () => {
         if (!selectedDevice || !selectedPlan || !user) return;
 
         setProcessing(true);
@@ -126,13 +158,17 @@ export default function PremiumPage() {
                 device_name: selectedDevice.victime_name,
                 device_id: selectedDevice.victim_id,
                 date: new Date().toISOString(),
-                amount: selectedPlan.price,
+                amount: finalAmount,
                 status: true,
             };
 
             const paymentCreated = await createPayment(paymentData);
 
             if (paymentCreated) {
+                if (couponResult?.coupon?.$id) {
+                    const nextCount = (couponResult.coupon.redemption_count || 0) + 1;
+                    await incrementCouponRedemption(couponResult.coupon.$id, nextCount);
+                }
                 await updateChild(selectedDevice.$id);
                 showSuccess('Payment Successful!', `${selectedDevice.victime_name} is now premium!`);
                 router.push('/home');
@@ -145,7 +181,7 @@ export default function PremiumPage() {
         } finally {
             setProcessing(false);
         }
-    };
+    }, [selectedDevice, selectedPlan, user, finalAmount, couponResult, showSuccess, showError, router]);
 
     const initiatePayPalPayment = async () => {
         if (!selectedDevice || !selectedPlan) {
@@ -157,7 +193,6 @@ export default function PremiumPage() {
         showInfo('Connecting to PayPal...', 'Please wait while we set up your payment.');
 
         try {
-            // 1. Get PayPal Access Token
             const authResponse = await fetch(`${PAYPAL_API}/v1/oauth2/token`, {
                 method: 'POST',
                 headers: {
@@ -174,7 +209,6 @@ export default function PremiumPage() {
             const authData = await authResponse.json();
             const accessToken = authData.access_token;
 
-            // 2. Create PayPal Order
             const orderResponse = await fetch(`${PAYPAL_API}/v2/checkout/orders`, {
                 method: 'POST',
                 headers: {
@@ -187,7 +221,7 @@ export default function PremiumPage() {
                         {
                             amount: {
                                 currency_code: 'USD',
-                                value: selectedPlan.price.toString(),
+                                value: finalAmount.toString(),
                             },
                             description: `MindSafe ${selectedPlan.name} - ${selectedDevice.victime_name}`,
                         },
@@ -212,37 +246,27 @@ export default function PremiumPage() {
                 throw new Error('No approval URL found');
             }
 
-            // Store order info for later
             localStorage.setItem('paypal_order', JSON.stringify({
                 orderId: orderData.id,
                 deviceId: selectedDevice.$id,
                 planId: selectedPlan.id,
-                price: selectedPlan.price,
+                price: finalAmount,
             }));
 
-            // 3. Open PayPal in a new window
             const popup = window.open(approvalLink, 'PayPal', 'width=450,height=600,left=100,top=100');
             setPaymentWindow(popup);
 
-            // Check if popup was blocked
             if (!popup) {
-                // Fallback: redirect to PayPal
                 window.location.href = approvalLink;
                 return;
             }
 
-            // Monitor popup
             const checkPopup = setInterval(() => {
                 if (popup.closed) {
                     clearInterval(checkPopup);
-                    // Check if payment was successful via URL
-                    const storedOrder = localStorage.getItem('paypal_order');
-                    if (storedOrder) {
-                        // Payment might still be processing
-                        setTimeout(() => {
-                            setProcessing(false);
-                        }, 2000);
-                    }
+                    setTimeout(() => {
+                        setProcessing(false);
+                    }, 2000);
                 }
             }, 500);
 
@@ -263,7 +287,6 @@ export default function PremiumPage() {
 
     return (
         <div className="max-w-6xl mx-auto">
-            {/* Header */}
             <div className="gradient-border mb-8">
                 <div className="bg-[#1a0b2e] rounded-[1.15rem] p-6">
                     <div className="flex items-center justify-between">
@@ -294,7 +317,6 @@ export default function PremiumPage() {
                 </div>
             ) : (
                 <>
-                    {/* Device Selection */}
                     <div className="ms-card p-5 mb-6">
                         <label className="text-white font-semibold mb-3 block">Select Device to Upgrade</label>
                         <div className="relative">
@@ -339,14 +361,16 @@ export default function PremiumPage() {
                         </div>
                     </div>
 
-                    {/* Plan Selection */}
                     <div className="mb-6">
                         <h2 className="text-xl font-bold text-white mb-4">Choose Your Plan</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {plans.map((plan) => (
                                 <button
                                     key={plan.id}
-                                    onClick={() => setSelectedPlan(plan)}
+                                    onClick={() => {
+                                        setSelectedPlan(plan);
+                                        setCouponResult(null);
+                                    }}
                                     className={`relative p-0.5 rounded-2xl transition-all ${selectedPlan?.id === plan.id ? 'bg-gradient-to-br from-yellow-400 via-orange-500 to-amber-600' : 'bg-gradient-to-br from-orange-500/30 to-yellow-500/30'}`}
                                 >
                                     {plan.popular && (
@@ -389,7 +413,29 @@ export default function PremiumPage() {
                         </div>
                     </div>
 
-                    {/* Pay Button */}
+                    <div className="ms-card p-5 mb-6">
+                        <label className="text-white font-semibold mb-3 block">Coupon / Promo Code</label>
+                        <div className="flex gap-2">
+                            <input
+                                value={couponCode}
+                                onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                                placeholder="Enter coupon code"
+                                className="ms-input"
+                            />
+                            <button
+                                onClick={handleApplyCoupon}
+                                className="px-4 py-2 rounded-xl bg-orange-500 text-white font-semibold"
+                            >
+                                Apply
+                            </button>
+                        </div>
+                        <div className="mt-3 text-sm">
+                            <p className="text-gray-300">Base: ${baseAmount.toFixed(2)}</p>
+                            {couponResult?.valid && <p className="text-emerald-400">Discount: -${couponResult.discountAmount.toFixed(2)}</p>}
+                            <p className="text-orange-300 font-semibold">Final: ${finalAmount.toFixed(2)}</p>
+                        </div>
+                    </div>
+
                     <button
                         onClick={initiatePayPalPayment}
                         disabled={!selectedDevice || !selectedPlan || processing}
@@ -406,13 +452,12 @@ export default function PremiumPage() {
                         ) : (
                             <>
                                 <CreditCard className="w-6 h-6" />
-                                {selectedPlan ? `Pay $${selectedPlan.price} with PayPal` : 'Select a Plan'}
+                                {selectedPlan ? `Pay $${finalAmount.toFixed(2)} with PayPal` : 'Select a Plan'}
                                 <ExternalLink className="w-4 h-4 ml-1" />
                             </>
                         )}
                     </button>
 
-                    {/* Features */}
                     <div className="ms-card p-6">
                         <h3 className="text-lg font-bold text-white mb-4">Premium Features</h3>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -437,3 +482,6 @@ export default function PremiumPage() {
         </div>
     );
 }
+
+
+

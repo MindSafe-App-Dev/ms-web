@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { signOut } from '@/lib/appwrite';
-import { Home, BookOpen, Cloud, User, LogOut, Loader2, Menu, X } from 'lucide-react';
+import { Home, BookOpen, Cloud, User, LogOut, Loader2, Menu, X, BadgePercent } from 'lucide-react';
 import { useState } from 'react';
 
 const navItems = [
@@ -13,6 +13,7 @@ const navItems = [
     { href: '/tutorial', label: 'Tutorial', icon: BookOpen },
     { href: '/cloud', label: 'Cloud', icon: Cloud },
     { href: '/profile', label: 'Profile', icon: User },
+    { href: '/coupon-management', label: 'Coupons', icon: BadgePercent },
 ];
 
 export default function DashboardLayout({
@@ -143,3 +144,4 @@ export default function DashboardLayout({
         </div>
     );
 }
+

@@ -2,6 +2,8 @@
 
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
+import { useGlobalContext } from '@/context/GlobalProvider';
+import { consumeTrialAccess } from '@/lib/appwrite';
 import Link from 'next/link';
 import {
     Camera, Mic, Phone, Users, MessageSquare, MapPin, Folder,
@@ -18,36 +20,48 @@ const features = [
     { id: 'files', title: 'File Manager', description: 'Browse and download files', icon: Folder, premium: true },
 ];
 
-export default function DeviceOptionsPage({ params }: { params: { id: string } }) {
+export default function DeviceOptionsPage() {
     const searchParams = useSearchParams();
     const router = useRouter();
-    const { showPremium } = useNotification();
+    const { user } = useGlobalContext();
+    const { showPremium, showInfo, showWarning } = useNotification();
 
     const deviceName = searchParams.get('name') || 'Unknown Device';
     const deviceId = searchParams.get('deviceId') || '';
     const isPremiumParam = searchParams.get('isPremium');
-    // Handle various truthy values: 'true', 'True', '1', etc.
     const isPremium = isPremiumParam === 'true' || isPremiumParam === 'True' || isPremiumParam === '1';
 
-    console.log('Device Options - isPremium param:', isPremiumParam, '-> parsed as:', isPremium);
-
-    const handleFeatureClick = (feature: typeof features[0]) => {
+    const handleFeatureClick = async (feature: typeof features[0]) => {
         const isLocked = feature.premium && !isPremium;
 
-        if (isLocked) {
-            showPremium(
-                'Premium Feature',
-                `${feature.title} is a premium feature. Upgrade your plan to access all monitoring tools.`,
-                () => router.push('/premium')
-            );
-        } else {
+        if (!isLocked) {
             router.push(`/device/${feature.id}?name=${encodeURIComponent(deviceName)}&deviceId=${deviceId}`);
+            return;
         }
+
+        if (!user?.$id || !deviceId) {
+            showWarning('Trial Unavailable', 'Missing device/user details for trial access.');
+            router.push('/premium');
+            return;
+        }
+
+        const trialResult = await consumeTrialAccess(user.$id, deviceId);
+        if (trialResult.allowed) {
+            showInfo('Trial Access Used', `${trialResult.usedCount}/${trialResult.maxUses} used. ${trialResult.remaining} remaining this month.`);
+            router.push(`/device/${feature.id}?name=${encodeURIComponent(deviceName)}&deviceId=${deviceId}`);
+            return;
+        }
+
+        showWarning('Trial Limit Reached', trialResult.message);
+        showPremium(
+            'Premium Feature',
+            `${feature.title} is a premium feature. Upgrade your plan to access all monitoring tools.`,
+            () => router.push('/premium')
+        );
     };
 
     return (
         <div className="max-w-4xl mx-auto">
-            {/* Header */}
             <div className="mb-6">
                 <button
                     onClick={() => router.push('/home')}
@@ -57,12 +71,10 @@ export default function DeviceOptionsPage({ params }: { params: { id: string } }
                 </button>
 
                 <div className="ms-card p-5 flex items-center gap-4">
-                    {/* Device Icon */}
                     <div className="w-14 h-14 rounded-full gradient-primary flex items-center justify-center">
                         <Smartphone className="w-7 h-7 text-white" />
                     </div>
 
-                    {/* Device Info */}
                     <div className="flex-1 min-w-0">
                         <p className="text-gray-400 text-xs mb-1">Monitoring</p>
                         <h1 className="text-xl font-bold text-white truncate">{deviceName}</h1>
@@ -72,7 +84,6 @@ export default function DeviceOptionsPage({ params }: { params: { id: string } }
                         </div>
                     </div>
 
-                    {/* Premium Badge */}
                     {isPremium && (
                         <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-yellow-500/15 border border-yellow-500/30">
                             <Crown className="w-4 h-4 text-yellow-400" />
@@ -82,13 +93,11 @@ export default function DeviceOptionsPage({ params }: { params: { id: string } }
                 </div>
             </div>
 
-            {/* Section Title */}
             <div className="mb-4">
                 <h2 className="text-2xl font-bold text-white">Monitoring Tools</h2>
                 <p className="text-gray-400 mt-1">Select a feature to start monitoring</p>
             </div>
 
-            {/* Feature Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                 {features.map((feature) => {
                     const isLocked = feature.premium && !isPremium;
@@ -104,7 +113,6 @@ export default function DeviceOptionsPage({ params }: { params: { id: string } }
                                 }`}
                         >
                             <div className="flex flex-col items-center text-center">
-                                {/* Icon */}
                                 <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${isLocked
                                     ? 'bg-gray-700/30 border border-gray-600/30'
                                     : 'bg-orange-500/15 border border-orange-500/30'
@@ -116,17 +124,14 @@ export default function DeviceOptionsPage({ params }: { params: { id: string } }
                                     )}
                                 </div>
 
-                                {/* Title */}
                                 <h3 className={`text-base font-bold mb-1 ${isLocked ? 'text-gray-400' : 'text-white'}`}>
                                     {feature.title}
                                 </h3>
 
-                                {/* Description */}
                                 <p className={`text-xs mb-3 ${isLocked ? 'text-gray-600' : 'text-gray-300'}`}>
                                     {feature.description}
                                 </p>
 
-                                {/* Lock Badge */}
                                 {isLocked && (
                                     <div className="px-3 py-1 rounded-full bg-gray-700/30 border border-gray-600/30">
                                         <span className="text-gray-400 text-xs font-semibold">Premium</span>
@@ -138,7 +143,6 @@ export default function DeviceOptionsPage({ params }: { params: { id: string } }
                 })}
             </div>
 
-            {/* Upgrade Banner */}
             {!isPremium && (
                 <Link
                     href="/premium"
