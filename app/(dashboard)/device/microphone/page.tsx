@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { consumeTrialAccess } from '@/lib/appwrite';
+import { buildPremiumRoute, PREMIUM_TRIAL_FEATURE_IDS } from '@/lib/premium';
 import { initSocket, sendCommand, onResult, disconnectSocket, SocketResult } from '@/lib/socket';
 import { Mic, ArrowLeft, Play, Square, Download, Share2, CheckCircle, Clock, Radio } from 'lucide-react';
 
@@ -49,10 +50,10 @@ export default function MicrophonePage() {
             return false;
         }
 
-        const trial = await consumeTrialAccess(user.$id, deviceId, 'microphone');
+        const trial = await consumeTrialAccess(user.$id, deviceId, PREMIUM_TRIAL_FEATURE_IDS.microphone);
         if (!trial.allowed) {
             showWarning('Trial Limit Reached', trial.message);
-            showPremium('Premium Feature', 'Microphone trial limit reached. Upgrade to continue.', () => router.push('/premium'));
+            showPremium('Premium Feature', 'Microphone trial limit reached. Upgrade to continue.', () => router.push(buildPremiumRoute(deviceId)));
             return false;
         }
 

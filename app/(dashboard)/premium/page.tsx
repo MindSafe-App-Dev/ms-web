@@ -5,14 +5,25 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { useNotification } from '@/context/NotificationProvider';
 import {
-    createPayment,
-    updateChild,
     getAllChild,
     Child,
     validateCouponCode,
-    incrementCouponRedemption,
     CouponValidationResult,
 } from '@/lib/appwrite';
+import {
+    buildPendingPayPalOrder,
+    clearPendingPayPalOrder,
+    finalizePremiumCheckout,
+    formatCurrency,
+    hasCompletedPayPalOrder,
+    markPayPalOrderCompleted,
+    PREMIUM_COPY,
+    PREMIUM_PLANS,
+    readPendingPayPalOrder,
+    type PremiumPlanId,
+    type StoredPayPalOrder,
+    writePendingPayPalOrder,
+} from '@/lib/premium';
 import { ArrowLeft, Crown, Check, Zap, Shield, Clock, Cloud, Smartphone, ChevronDown, Loader2, CreditCard, ExternalLink } from 'lucide-react';
 
 const PAYPAL_CLIENT_ID = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "AWW4B0m2iwsdPu5R2Thbdhm6pq0e6NB73Z5FLEBjbJn-pWGgwj8rRoqi7yTDJuEVmNOdmkAZZDtMZdat";
@@ -20,48 +31,28 @@ const PAYPAL_SECRET = process.env.NEXT_PUBLIC_PAYPAL_SECRET || "EJUXp2Ipo4zkORbK
 const PAYPAL_API = "https://api-m.sandbox.paypal.com";
 
 interface Plan {
-    id: string;
+    id: PremiumPlanId;
     name: string;
     price: number;
-    period: string;
+    billingLabel: string;
     description: string;
     discountLabel?: string;
     features: string[];
     popular?: boolean;
+    shortLabel: string;
 }
 
-const plans: Plan[] = [
-    {
-        id: 'monthly',
-        name: 'Test Us!',
-        price: 49,
-        period: '/month',
-        description: 'Perfect to try out all features',
-        features: [
-            '24/7 Support',
-            'All Features Access',
-            'Download to Local Device',
-            'Real-time Monitoring',
-        ],
-    },
-    {
-        id: 'yearly',
-        name: 'Be Mind Safe',
-        price: 499,
-        period: '/year',
-        description: 'Best value for families',
-        discountLabel: '2 months free',
-        features: [
-            '24/7 Priority Support',
-            'All Features Access',
-            'Download to Local Device',
-            'Real-time Monitoring',
-            'Cloud Storage (Coming Soon)',
-            'Multi-device Dashboard',
-        ],
-        popular: true,
-    },
-];
+const plans: Plan[] = PREMIUM_PLANS.map((plan) => ({
+    id: plan.id,
+    name: plan.name,
+    price: plan.price,
+    billingLabel: plan.cadence,
+    description: plan.description,
+    discountLabel: plan.id === 'yearly' ? '2 months off' : plan.id === 'premium' ? 'One-time' : undefined,
+    features: plan.features,
+    popular: plan.popular,
+    shortLabel: plan.shortLabel,
+}));
 
 export default function PremiumPage() {
     const searchParams = useSearchParams();
@@ -71,7 +62,7 @@ export default function PremiumPage() {
 
     const [devices, setDevices] = useState<Child[]>([]);
     const [selectedDevice, setSelectedDevice] = useState<Child | null>(null);
-    const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+    const [selectedPlan, setSelectedPlan] = useState<Plan | null>(plans.find((plan) => plan.id === 'yearly') || plans[0] || null);
     const [couponCode, setCouponCode] = useState('');
     const [couponResult, setCouponResult] = useState<CouponValidationResult | null>(null);
     const [loading, setLoading] = useState(true);
@@ -94,7 +85,7 @@ export default function PremiumPage() {
                 setDevices(nonPremiumDevices);
 
                 if (deviceIdFromUrl) {
-                    const device = data.find(d => d.victim_id === deviceIdFromUrl);
+                    const device = nonPremiumDevices.find(d => d.victim_id === deviceIdFromUrl);
                     if (device) setSelectedDevice(device);
                 } else if (nonPremiumDevices.length === 1) {
                     setSelectedDevice(nonPremiumDevices[0]);
@@ -109,13 +100,76 @@ export default function PremiumPage() {
         fetchDevices();
     }, [user?.$id, deviceIdFromUrl]);
 
+    const handleApplyCoupon = async () => {
+        if (!selectedPlan) {
+            showWarning('Select Plan First', 'Please choose a plan before applying coupon.');
+            return;
+        }
+
+        if (selectedPlan.price === 0) {
+            showInfo(PREMIUM_COPY.freePlanSelectedTitle, PREMIUM_COPY.freePlanSelectedMessage);
+            return;
+        }
+
+        if (!couponCode.trim()) {
+            showWarning(PREMIUM_COPY.missingCouponTitle, PREMIUM_COPY.missingCouponMessage);
+            return;
+        }
+
+        const result = await validateCouponCode(couponCode, selectedPlan.price);
+        if (!result.valid) {
+            setCouponResult(null);
+            showError(PREMIUM_COPY.invalidCouponTitle, result.message);
+            return;
+        }
+
+        setCouponResult(result);
+        showSuccess(
+            PREMIUM_COPY.couponAppliedTitle,
+            PREMIUM_COPY.couponAppliedSaved.replace('{amount}', formatCurrency(result.discountAmount)),
+        );
+    };
+
+    async function handlePaymentSuccess(order: StoredPayPalOrder) {
+        if (hasCompletedPayPalOrder(order.orderId)) {
+            clearPendingPayPalOrder();
+            router.push('/home');
+            return;
+        }
+
+        setProcessing(true);
+
+        try {
+            await finalizePremiumCheckout(order);
+            markPayPalOrderCompleted(order.orderId);
+            clearPendingPayPalOrder();
+            showSuccess(PREMIUM_COPY.paymentSuccessTitle, PREMIUM_COPY.paymentSuccessMessage.replace('{plan}', order.planName).replace('{device}', order.deviceName));
+            router.push('/home');
+        } catch (error) {
+            console.error('Payment processing error:', error);
+            showError(
+                PREMIUM_COPY.processingErrorTitle,
+                error instanceof Error ? error.message : PREMIUM_COPY.processingErrorMessage,
+            );
+        } finally {
+            setProcessing(false);
+        }
+    }
+
     useEffect(() => {
         const handleMessage = async (event: MessageEvent) => {
-            if (event.data?.type === 'PAYPAL_SUCCESS' && event.data?.orderId) {
+            if (event.data?.type === 'PAYPAL_SUCCESS') {
                 paymentWindow?.close();
-                await handlePaymentSuccess();
+                const order = (event.data.order as StoredPayPalOrder | undefined) || readPendingPayPalOrder();
+                if (!order) {
+                    setProcessing(false);
+                    showError(PREMIUM_COPY.paymentFailedTitle, PREMIUM_COPY.paymentFailedMessage);
+                    return;
+                }
+                await handlePaymentSuccess(order);
             } else if (event.data?.type === 'PAYPAL_CANCEL') {
                 paymentWindow?.close();
+                clearPendingPayPalOrder();
                 setProcessing(false);
                 showWarning('Payment Cancelled', 'You cancelled the payment.');
             }
@@ -123,65 +177,22 @@ export default function PremiumPage() {
 
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
-    }, [paymentWindow, handlePaymentSuccess, showWarning]);
+    }, [paymentWindow, showError, showWarning]);
 
-    const handleApplyCoupon = async () => {
-        if (!selectedPlan) {
-            showWarning('Select Plan First', 'Please choose a plan before applying coupon.');
+    const handleCheckoutPress = () => {
+        if (!selectedDevice || !selectedPlan) {
+            showWarning('Incomplete Selection', 'Please select a device and plan first.');
             return;
         }
 
-        if (!couponCode.trim()) {
-            showWarning('Missing Coupon', 'Enter a coupon code to apply discount.');
+        if (selectedPlan.price === 0) {
+            showInfo(PREMIUM_COPY.stayOnFreeTitle, PREMIUM_COPY.stayOnFreeMessage);
+            router.back();
             return;
         }
 
-        const result = await validateCouponCode(couponCode, selectedPlan.price);
-        if (!result.valid) {
-            setCouponResult(null);
-            showError('Invalid Coupon', result.message);
-            return;
-        }
-
-        setCouponResult(result);
-        showSuccess('Coupon Applied', `You saved $${result.discountAmount.toFixed(2)}.`);
+        void initiatePayPalPayment();
     };
-
-    async function handlePaymentSuccess() {
-        if (!selectedDevice || !selectedPlan || !user) return;
-
-        setProcessing(true);
-
-        try {
-            const paymentData = {
-                client_id: user.$id,
-                device_name: selectedDevice.victime_name,
-                device_id: selectedDevice.victim_id,
-                date: new Date().toISOString(),
-                amount: finalAmount,
-                status: true,
-            };
-
-            const paymentCreated = await createPayment(paymentData);
-
-            if (paymentCreated) {
-                if (couponResult?.coupon?.$id) {
-                    const nextCount = (couponResult.coupon.redemption_count || 0) + 1;
-                    await incrementCouponRedemption(couponResult.coupon.$id, nextCount);
-                }
-                await updateChild(selectedDevice.$id);
-                showSuccess('Payment Successful!', `${selectedDevice.victime_name} is now premium!`);
-                router.push('/home');
-            } else {
-                showError('Payment Error', 'Failed to record payment. Please contact support.');
-            }
-        } catch (error) {
-            console.error('Payment processing error:', error);
-            showError('Processing Error', 'An error occurred. Please try again.');
-        } finally {
-            setProcessing(false);
-        }
-    }
 
     const initiatePayPalPayment = async () => {
         if (!selectedDevice || !selectedPlan) {

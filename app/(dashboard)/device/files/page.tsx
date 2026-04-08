@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { consumeTrialAccess } from '@/lib/appwrite';
+import { buildPremiumRoute, PREMIUM_TRIAL_FEATURE_IDS } from '@/lib/premium';
 import { initSocket, sendCommand, onResult, COMMANDS, disconnectSocket, SocketResult } from '@/lib/socket';
 import { getFileIcon, formatFileSize } from '@/lib/utils';
 import { Folder, ArrowLeft, RefreshCw, ChevronRight, Download, FolderOpen, Image, HardDrive, FileText, Music, Video, Camera } from 'lucide-react';
@@ -49,10 +50,10 @@ export default function FilesPage() {
             return false;
         }
 
-        const trial = await consumeTrialAccess(user.$id, deviceId, 'files');
+        const trial = await consumeTrialAccess(user.$id, deviceId, PREMIUM_TRIAL_FEATURE_IDS.files);
         if (!trial.allowed) {
             showWarning('Trial Limit Reached', trial.message);
-            showPremium('Premium Feature', 'File Manager trial limit reached. Upgrade to continue.', () => router.push('/premium'));
+            showPremium('Premium Feature', 'File Manager trial limit reached. Upgrade to continue.', () => router.push(buildPremiumRoute(deviceId)));
             return false;
         }
 

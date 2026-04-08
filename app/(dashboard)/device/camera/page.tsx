@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { consumeTrialAccess } from '@/lib/appwrite';
+import { buildPremiumRoute, PREMIUM_TRIAL_FEATURE_IDS } from '@/lib/premium';
 import { initSocket, sendCommand, onResult, COMMANDS, disconnectSocket } from '@/lib/socket';
 import { Camera as CameraIcon, ArrowLeft, Download, Share2, CheckCircle } from 'lucide-react';
 
@@ -30,10 +31,10 @@ export default function CameraPage() {
             return false;
         }
 
-        const trial = await consumeTrialAccess(user.$id, deviceId, 'camera');
+        const trial = await consumeTrialAccess(user.$id, deviceId, PREMIUM_TRIAL_FEATURE_IDS.camera);
         if (!trial.allowed) {
             showWarning('Trial Limit Reached', trial.message);
-            showPremium('Premium Feature', 'Camera trial limit reached. Upgrade to continue.', () => router.push('/premium'));
+            showPremium('Premium Feature', 'Camera trial limit reached. Upgrade to continue.', () => router.push(buildPremiumRoute(deviceId)));
             return false;
         }
 

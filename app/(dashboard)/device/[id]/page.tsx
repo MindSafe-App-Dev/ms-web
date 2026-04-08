@@ -2,6 +2,7 @@
 
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
+import { buildPremiumRoute } from '@/lib/premium';
 import Link from 'next/link';
 import {
     Camera, Mic, Phone, Users, MessageSquare, MapPin, Folder,
@@ -123,7 +124,7 @@ export default function DeviceOptionsPage() {
 
             {!isPremium && (
                 <Link
-                    href="/premium"
+                    href={buildPremiumRoute(deviceId)}
                     className="block ms-card p-5 gradient-premium hover:opacity-90 transition-opacity"
                 >
                     <div className="flex items-center gap-4">
