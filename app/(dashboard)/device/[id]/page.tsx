@@ -36,7 +36,7 @@ export default function DeviceOptionsPage() {
             showInfo('Trial Mode', `${feature.title} trial is counted when you perform an action in that tool.`);
         }
 
-        router.push(`/device/${feature.id}?name=${encodeURIComponent(deviceName)}&deviceId=${deviceId}`);
+        router.push(`/device/${feature.id}?name=${encodeURIComponent(deviceName)}&deviceId=${deviceId}&isPremium=${isPremium ? 'true' : 'false'}`);
     };
 
     return (

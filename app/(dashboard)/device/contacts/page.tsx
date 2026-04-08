@@ -24,6 +24,7 @@ export default function ContactsPage() {
 
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
+    const isPremium = searchParams.get('isPremium') === 'true';
 
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -31,6 +32,7 @@ export default function ContactsPage() {
     const [trialConsumed, setTrialConsumed] = useState(false);
 
     const ensureTrialOnFirstUse = async () => {
+        if (isPremium) return true;
         if (trialConsumed) return true;
         if (!user?.$id || !deviceId) {
             showWarning('Trial Unavailable', 'Missing device or user details.');

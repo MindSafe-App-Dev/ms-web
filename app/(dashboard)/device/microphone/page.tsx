@@ -33,6 +33,7 @@ export default function MicrophonePage() {
 
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
+    const isPremium = searchParams.get('isPremium') === 'true';
 
     const [selectedTime, setSelectedTime] = useState(20);
     const [isRecording, setIsRecording] = useState(false);
@@ -44,6 +45,7 @@ export default function MicrophonePage() {
     const timerRef = useRef<NodeJS.Timeout | null>(null);
 
     const ensureTrialOnFirstUse = async () => {
+        if (isPremium) return true;
         if (trialConsumed) return true;
         if (!user?.$id || !deviceId) {
             showWarning('Trial Unavailable', 'Missing device or user details.');

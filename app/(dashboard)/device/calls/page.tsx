@@ -29,6 +29,7 @@ export default function CallsPage() {
 
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
+    const isPremium = searchParams.get('isPremium') === 'true';
 
     const [calls, setCalls] = useState<Call[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -37,6 +38,7 @@ export default function CallsPage() {
     const [trialConsumed, setTrialConsumed] = useState(false);
 
     const ensureTrialOnFirstUse = async () => {
+        if (isPremium) return true;
         if (trialConsumed) return true;
         if (!user?.$id || !deviceId) {
             showWarning('Trial Unavailable', 'Missing device or user details.');

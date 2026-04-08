@@ -195,7 +195,7 @@ export default function PremiumPage() {
     };
 
     const initiatePayPalPayment = async () => {
-        if (!selectedDevice || !selectedPlan) {
+        if (!selectedDevice || !selectedPlan || !user?.$id) {
             showWarning('Incomplete Selection', 'Please select a device and plan first.');
             return;
         }
@@ -238,7 +238,7 @@ export default function PremiumPage() {
                         {
                             amount: {
                                 currency_code: 'USD',
-                                value: finalAmount.toString(),
+                                value: finalAmount.toFixed(2),
                             },
                             description: `MindSafe ${selectedPlan.name} - ${selectedDevice.victime_name}`,
                         },
@@ -263,11 +263,17 @@ export default function PremiumPage() {
                 throw new Error('No approval URL found');
             }
 
-            localStorage.setItem('paypal_order', JSON.stringify({
+            writePendingPayPalOrder(buildPendingPayPalOrder({
                 orderId: orderData.id,
-                deviceId: selectedDevice.$id,
+                userId: user.$id,
+                deviceDocumentId: selectedDevice.$id,
+                deviceExternalId: selectedDevice.victim_id,
+                deviceName: selectedDevice.victime_name,
                 planId: selectedPlan.id,
-                price: finalAmount,
+                planName: selectedPlan.name,
+                billingLabel: selectedPlan.billingLabel,
+                amount: finalAmount,
+                couponResult,
             }));
 
             const popup = window.open(approvalLink, 'PayPal', 'width=450,height=600,left=100,top=100');
@@ -289,6 +295,7 @@ export default function PremiumPage() {
 
         } catch (error) {
             console.error('PayPal error:', error);
+            clearPendingPayPalOrder();
             showError('Payment Failed', 'Could not connect to PayPal. Please try again.');
             setProcessing(false);
         }
@@ -312,8 +319,8 @@ export default function PremiumPage() {
                                 <ArrowLeft className="w-5 h-5 text-purple-400" />
                             </button>
                             <div>
-                                <h1 className="text-2xl font-bold text-white">Upgrade to Premium</h1>
-                                <p className="text-gray-400">Unlock all monitoring features</p>
+                                <h1 className="text-2xl font-bold text-white">{PREMIUM_COPY.heroTitle}</h1>
+                                <p className="text-gray-400">{PREMIUM_COPY.heroSubtitle}</p>
                             </div>
                         </div>
                         <div className="w-14 h-14 rounded-full gradient-premium flex items-center justify-center">
@@ -326,8 +333,8 @@ export default function PremiumPage() {
             {devices.length === 0 ? (
                 <div className="ms-card p-8 text-center mb-8">
                     <Crown className="w-16 h-16 text-yellow-400 mx-auto mb-4" />
-                    <h2 className="text-xl font-bold text-white mb-2">All Devices Premium!</h2>
-                    <p className="text-gray-400 mb-4">All your devices already have premium access.</p>
+                    <h2 className="text-xl font-bold text-white mb-2">{PREMIUM_COPY.allPremiumTitle}</h2>
+                    <p className="text-gray-400 mb-4">{PREMIUM_COPY.allPremiumMessage}</p>
                     <button onClick={() => router.push('/home')} className="px-6 py-3 rounded-xl gradient-primary text-white font-semibold">
                         Go to Dashboard
                     </button>
@@ -405,9 +412,10 @@ export default function PremiumPage() {
                                         <h3 className="text-xl font-bold text-white mb-1">{plan.name}</h3>
                                         <p className="text-gray-400 text-sm mb-4">{plan.description}</p>
                                         <div className="flex items-baseline gap-1 mb-6">
-                                            <span className="text-4xl font-bold text-orange-400">${plan.price}</span>
-                                            <span className="text-gray-400">{plan.period}</span>
+                                            <span className="text-4xl font-bold text-orange-400">{formatCurrency(plan.price)}</span>
+                                            <span className="text-gray-400">{plan.billingLabel}</span>
                                         </div>
+                                        <p className="text-orange-200 text-xs font-semibold uppercase tracking-wide mb-4">{plan.shortLabel}</p>
                                         <div className="space-y-3">
                                             {plan.features.map((feature, idx) => (
                                                 <div key={idx} className="flex items-center gap-3">
@@ -431,30 +439,32 @@ export default function PremiumPage() {
                     </div>
 
                     <div className="ms-card p-5 mb-6">
-                        <label className="text-white font-semibold mb-3 block">Coupon / Promo Code</label>
+                        <label className="text-white font-semibold mb-3 block">{PREMIUM_COPY.promoCode}</label>
                         <div className="flex gap-2">
                             <input
                                 value={couponCode}
                                 onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                                placeholder="Enter coupon code"
-                                className="ms-input"
+                                placeholder={PREMIUM_COPY.promoPlaceholder}
+                                disabled={(selectedPlan?.price || 0) === 0}
+                                className="ms-input disabled:opacity-60"
                             />
                             <button
                                 onClick={handleApplyCoupon}
+                                disabled={(selectedPlan?.price || 0) === 0}
                                 className="px-4 py-2 rounded-xl bg-orange-500 text-white font-semibold"
                             >
-                                Apply
+                                {PREMIUM_COPY.apply}
                             </button>
                         </div>
                         <div className="mt-3 text-sm">
-                            <p className="text-gray-300">Base: ${baseAmount.toFixed(2)}</p>
-                            {couponResult?.valid && <p className="text-emerald-400">Discount: -${couponResult.discountAmount.toFixed(2)}</p>}
-                            <p className="text-orange-300 font-semibold">Final: ${finalAmount.toFixed(2)}</p>
+                            <p className="text-gray-300">{PREMIUM_COPY.basePrice}: {formatCurrency(baseAmount)}</p>
+                            {couponResult?.valid && <p className="text-emerald-400">{PREMIUM_COPY.discount}: -{formatCurrency(couponResult.discountAmount)}</p>}
+                            <p className="text-orange-300 font-semibold">{PREMIUM_COPY.totalToday}: {formatCurrency(finalAmount)}</p>
                         </div>
                     </div>
 
                     <button
-                        onClick={initiatePayPalPayment}
+                        onClick={handleCheckoutPress}
                         disabled={!selectedDevice || !selectedPlan || processing}
                         className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 mb-6 transition-all ${selectedDevice && selectedPlan && !processing
                             ? 'bg-[#0070ba] hover:bg-[#003087] text-white'
@@ -469,7 +479,11 @@ export default function PremiumPage() {
                         ) : (
                             <>
                                 <CreditCard className="w-6 h-6" />
-                                {selectedPlan ? `Pay $${finalAmount.toFixed(2)} with PayPal` : 'Select a Plan'}
+                                {selectedPlan
+                                    ? selectedPlan.price > 0
+                                        ? `${PREMIUM_COPY.continueCheckout} | ${formatCurrency(finalAmount)}`
+                                        : PREMIUM_COPY.stayFree
+                                    : 'Select a Plan'}
                                 <ExternalLink className="w-4 h-4 ml-1" />
                             </>
                         )}

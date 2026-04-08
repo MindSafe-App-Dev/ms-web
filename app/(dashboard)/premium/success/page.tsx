@@ -2,32 +2,32 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useGlobalContext } from '@/context/GlobalProvider';
+import { CheckCircle, Loader2, XCircle } from 'lucide-react';
 import { useNotification } from '@/context/NotificationProvider';
-import { createPayment, updateChild } from '@/lib/appwrite';
-import { CheckCircle, Loader2 } from 'lucide-react';
+import {
+    clearPendingPayPalOrder,
+    finalizePremiumCheckout,
+    hasCompletedPayPalOrder,
+    markPayPalOrderCompleted,
+    PREMIUM_COPY,
+    readPendingPayPalOrder,
+} from '@/lib/premium';
 
-const PAYPAL_CLIENT_ID = "AWW4B0m2iwsdPu5R2Thbdhm6pq0e6NB73Z5FLEBjbJn-pWGgwj8rRoqi7yTDJuEVmNOdmkAZZDtMZdat";
-const PAYPAL_SECRET = "EJUXp2Ipo4zkORbKC2uac24CZKy_SGh1xKHtk6S6ZCvIHYG99vDohRCqqW15Jm0b5apB8zeD-PiItxPi";
-const PAYPAL_API = "https://api-m.sandbox.paypal.com";
+const PAYPAL_CLIENT_ID = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || 'AWW4B0m2iwsdPu5R2Thbdhm6pq0e6NB73Z5FLEBjbJn-pWGgwj8rRoqi7yTDJuEVmNOdmkAZZDtMZdat';
+const PAYPAL_SECRET = process.env.NEXT_PUBLIC_PAYPAL_SECRET || 'EJUXp2Ipo4zkORbKC2uac24CZKy_SGh1xKHtk6S6ZCvIHYG99vDohRCqqW15Jm0b5apB8zeD-PiItxPi';
+const PAYPAL_API = 'https://api-m.sandbox.paypal.com';
 
 export default function PaymentSuccessPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const { user } = useGlobalContext();
-    const { showSuccess, showError } = useNotification();
-
+    const { showError, showSuccess } = useNotification();
     const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
     const [message, setMessage] = useState('Processing your payment...');
 
     useEffect(() => {
         const capturePayment = async () => {
-            const token = searchParams.get('token'); // PayPal order ID
-            const payerId = searchParams.get('PayerID');
-            const storedOrder = localStorage.getItem('paypal_order');
-
-            console.log('PayPal return params:', { token, payerId });
-            console.log('Stored order:', storedOrder);
+            const token = searchParams.get('token');
+            const pendingOrder = readPendingPayPalOrder();
 
             if (!token) {
                 setStatus('error');
@@ -35,122 +35,96 @@ export default function PaymentSuccessPage() {
                 return;
             }
 
-            // Parse stored order info
-            let orderInfo: { deviceId: string; price: number } | null = null;
-            if (storedOrder) {
-                try {
-                    orderInfo = JSON.parse(storedOrder);
-                } catch (e) {
-                    console.error('Error parsing stored order:', e);
-                }
+            if (hasCompletedPayPalOrder(token)) {
+                clearPendingPayPalOrder();
+                setStatus('success');
+                setMessage('This payment was already completed.');
+                setTimeout(() => router.push('/home'), 1500);
+                return;
             }
 
             try {
-                // Get access token
                 const authResponse = await fetch(`${PAYPAL_API}/v1/oauth2/token`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded',
-                        'Authorization': `Basic ${btoa(`${PAYPAL_CLIENT_ID}:${PAYPAL_SECRET}`)}`,
+                        Authorization: `Basic ${btoa(`${PAYPAL_CLIENT_ID}:${PAYPAL_SECRET}`)}`,
                     },
                     body: 'grant_type=client_credentials',
                 });
 
                 if (!authResponse.ok) {
-                    throw new Error('Failed to get PayPal access token');
+                    throw new Error('Failed to get PayPal access token.');
                 }
 
                 const authData = await authResponse.json();
                 const accessToken = authData.access_token;
-
-                // First, check the order status
                 const orderResponse = await fetch(`${PAYPAL_API}/v2/checkout/orders/${token}`, {
                     method: 'GET',
                     headers: {
-                        'Authorization': `Bearer ${accessToken}`,
+                        Authorization: `Bearer ${accessToken}`,
                         'Content-Type': 'application/json',
                     },
                 });
 
                 const orderData = await orderResponse.json();
-                console.log('Order status:', orderData);
+                const isApproved = orderData.status === 'APPROVED';
+                const isCompleted = orderData.status === 'COMPLETED';
 
-                let isCompleted = false;
-
-                // If order is already captured, we're done
-                if (orderData.status === 'COMPLETED') {
-                    isCompleted = true;
-                }
-                // If order is approved, capture it
-                else if (orderData.status === 'APPROVED') {
-                    setMessage('Capturing payment...');
-
-                    const captureResponse = await fetch(`${PAYPAL_API}/v2/checkout/orders/${token}/capture`, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${accessToken}`,
-                            'Content-Type': 'application/json',
-                        },
-                    });
-
-                    const captureData = await captureResponse.json();
-                    console.log('Capture response:', captureData);
-
-                    if (captureData.status === 'COMPLETED') {
-                        isCompleted = true;
-                    } else {
-                        console.error('Unexpected capture status:', captureData.status);
-                        throw new Error(`Payment capture returned status: ${captureData.status}`);
-                    }
-                } else {
-                    console.error('Unexpected order status:', orderData.status);
+                if (!isApproved && !isCompleted) {
                     throw new Error(`Order status: ${orderData.status}. Expected APPROVED or COMPLETED.`);
                 }
 
-                if (isCompleted) {
-                    // Record payment in database
-                    if (user && orderInfo) {
-                        try {
-                            const paymentData = {
-                                client_id: user.$id,
-                                device_name: 'Device',
-                                device_id: orderInfo.deviceId,
-                                date: new Date().toISOString(),
-                                amount: orderInfo.price,
-                                status: true,
-                            };
+                if (isApproved) {
+                    setMessage('Capturing payment...');
+                    const captureResponse = await fetch(`${PAYPAL_API}/v2/checkout/orders/${token}/capture`, {
+                        method: 'POST',
+                        headers: {
+                            Authorization: `Bearer ${accessToken}`,
+                            'Content-Type': 'application/json',
+                        },
+                    });
+                    const captureData = await captureResponse.json();
 
-                            await createPayment(paymentData);
-                            await updateChild(orderInfo.deviceId);
-                        } catch (dbError) {
-                            console.error('Database update error:', dbError);
-                            // Payment was successful even if DB update fails
-                        }
-                    }
-
-                    localStorage.removeItem('paypal_order');
-                    setStatus('success');
-                    setMessage('Payment successful! Your device is now premium.');
-                    showSuccess('Payment Complete', 'Your premium subscription is now active!');
-
-                    // Close popup and notify parent
-                    if (window.opener) {
-                        window.opener.postMessage({ type: 'PAYPAL_SUCCESS', orderId: token }, '*');
-                        setTimeout(() => window.close(), 2000);
-                    } else {
-                        setTimeout(() => router.push('/home'), 3000);
+                    if (captureData.status !== 'COMPLETED') {
+                        throw new Error(`Payment capture returned status: ${captureData.status}`);
                     }
                 }
+
+                if (window.opener) {
+                    window.opener.postMessage({
+                        type: 'PAYPAL_SUCCESS',
+                        order: pendingOrder ? { ...pendingOrder, orderId: token } : undefined,
+                    }, '*');
+                    clearPendingPayPalOrder();
+                    setStatus('success');
+                    setMessage('Payment approved. Returning to checkout...');
+                    setTimeout(() => window.close(), 1500);
+                    return;
+                }
+
+                if (!pendingOrder) {
+                    throw new Error('Payment was approved, but the pending checkout details were not found.');
+                }
+
+                const finalOrder = { ...pendingOrder, orderId: token };
+                await finalizePremiumCheckout(finalOrder);
+                markPayPalOrderCompleted(token);
+                clearPendingPayPalOrder();
+                setStatus('success');
+                setMessage(PREMIUM_COPY.paymentSuccessMessage.replace('{plan}', finalOrder.planName).replace('{device}', finalOrder.deviceName));
+                showSuccess(PREMIUM_COPY.paymentSuccessTitle, PREMIUM_COPY.paypal.successMessage);
+                setTimeout(() => router.push('/home'), 2000);
             } catch (error) {
                 console.error('Payment capture error:', error);
                 setStatus('error');
-                setMessage(error instanceof Error ? error.message : 'Failed to process payment.');
-                showError('Payment Error', 'Could not complete the payment.');
+                setMessage(error instanceof Error ? error.message : PREMIUM_COPY.paypal.paymentErrorMessage);
+                showError(PREMIUM_COPY.paypal.paymentErrorTitle, PREMIUM_COPY.paypal.paymentErrorMessage);
             }
         };
 
         capturePayment();
-    }, [searchParams, user, router, showSuccess, showError]);
+    }, [router, searchParams, showError, showSuccess]);
 
     return (
         <div className="min-h-screen flex items-center justify-center p-4">
@@ -174,9 +148,7 @@ export default function PaymentSuccessPage() {
 
                 {status === 'error' && (
                     <>
-                        <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-4">
-                            <span className="text-3xl">❌</span>
-                        </div>
+                        <XCircle className="w-16 h-16 text-red-400 mx-auto mb-4" />
                         <h2 className="text-xl font-bold text-white mb-2">Payment Issue</h2>
                         <p className="text-gray-400 mb-4">{message}</p>
                         <div className="flex gap-3 justify-center">

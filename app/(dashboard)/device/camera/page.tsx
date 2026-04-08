@@ -17,6 +17,7 @@ export default function CameraPage() {
 
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
+    const isPremium = searchParams.get('isPremium') === 'true';
 
     const [selectedCamera, setSelectedCamera] = useState<0 | 1>(0); // 0 = back, 1 = front
     const [isCapturing, setIsCapturing] = useState(false);
@@ -25,6 +26,7 @@ export default function CameraPage() {
     const [trialConsumed, setTrialConsumed] = useState(false);
 
     const ensureTrialOnFirstUse = async () => {
+        if (isPremium) return true;
         if (trialConsumed) return true;
         if (!user?.$id || !deviceId) {
             showWarning('Trial Unavailable', 'Missing device or user details.');

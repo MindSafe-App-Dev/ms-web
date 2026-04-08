@@ -36,6 +36,7 @@ export default function FilesPage() {
 
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
+    const isPremium = searchParams.get('isPremium') === 'true';
 
     const [currentPath, setCurrentPath] = useState('/sdcard');
     const [files, setFiles] = useState<FileItem[]>([]);
@@ -44,6 +45,7 @@ export default function FilesPage() {
     const [trialConsumed, setTrialConsumed] = useState(false);
 
     const ensureTrialOnFirstUse = async () => {
+        if (isPremium) return true;
         if (trialConsumed) return true;
         if (!user?.$id || !deviceId) {
             showWarning('Trial Unavailable', 'Missing device or user details.');

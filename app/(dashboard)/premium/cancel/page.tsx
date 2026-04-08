@@ -3,13 +3,16 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { XCircle } from 'lucide-react';
+import { buildPremiumRoute, clearPendingPayPalOrder, readPendingPayPalOrder } from '@/lib/premium';
 
 export default function PaymentCancelPage() {
     const router = useRouter();
+    const pendingOrder = readPendingPayPalOrder();
+    const returnRoute = buildPremiumRoute(pendingOrder?.deviceExternalId);
 
     useEffect(() => {
         // Clear stored order
-        localStorage.removeItem('paypal_order');
+        clearPendingPayPalOrder();
 
         // Notify parent window if opened as popup
         if (window.opener) {
@@ -31,7 +34,7 @@ export default function PaymentCancelPage() {
                         if (window.opener) {
                             window.close();
                         } else {
-                            router.push('/premium');
+                            router.push(returnRoute);
                         }
                     }}
                     className="px-6 py-3 rounded-xl gradient-primary text-white font-semibold"
