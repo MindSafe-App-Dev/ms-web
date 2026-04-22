@@ -4,6 +4,17 @@ import { connectDriveForAuthorizedUser, DriveRequestError, getDriveCallbackUrl, 
 
 export const runtime = 'nodejs';
 
+const getRequestAppUrl = (request: Request) => {
+  const forwardedProto = request.headers.get('x-forwarded-proto');
+  const forwardedHost = request.headers.get('x-forwarded-host');
+
+  if (forwardedProto && forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`;
+  }
+
+  return new URL(request.url).origin;
+};
+
 export async function POST(request: Request) {
   try {
     const { user, userJwt } = await requireAuthorizedMindSafeUser(request);
@@ -14,7 +25,9 @@ export async function POST(request: Request) {
       throw new DriveRequestError(400, 'Missing Google authorization code.');
     }
 
-    const redirectUri = typeof body.redirectUri === 'string' ? body.redirectUri : getDriveCallbackUrl();
+    const redirectUri = typeof body.redirectUri === 'string'
+      ? body.redirectUri
+      : getDriveCallbackUrl(getRequestAppUrl(request));
     const status = await connectDriveForAuthorizedUser(user, userJwt, code, redirectUri);
     return NextResponse.json(status);
   } catch (error) {

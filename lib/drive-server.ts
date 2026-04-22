@@ -24,6 +24,7 @@ interface DriveStatePayload {
   platform: ConnectPlatform;
   redirectPath: string;
   mobileRedirectUri?: string;
+  callbackUrl: string;
   createdAt: number;
 }
 
@@ -69,6 +70,7 @@ interface StartDriveConnectionOptions {
   platform: ConnectPlatform;
   redirectPath?: string;
   mobileRedirectUri?: string;
+  callbackUrl?: string;
 }
 
 interface UploadDriveFileInput {
@@ -559,8 +561,8 @@ function withQueryParams(url: string, params: Record<string, string>) {
   return nextUrl.toString();
 }
 
-export function getDriveCallbackUrl() {
-  return new URL(DRIVE_CALLBACK_PATH, getServerConfig().appUrl).toString();
+export function getDriveCallbackUrl(appUrl?: string) {
+  return new URL(DRIVE_CALLBACK_PATH, appUrl || getServerConfig().appUrl).toString();
 }
 
 export async function requireAuthorizedMindSafeUser(request: Request) {
@@ -587,17 +589,19 @@ export async function getDriveStatusForUser(userJwt: string) {
 }
 
 export async function startDriveConnection(userJwt: string, options: StartDriveConnectionOptions) {
+  const callbackUrl = options.callbackUrl || getDriveCallbackUrl();
   const state = encodeOAuthState({
     userJwt,
     platform: options.platform,
     redirectPath: options.redirectPath || '/cloud',
     mobileRedirectUri: options.mobileRedirectUri,
+    callbackUrl,
     createdAt: Date.now(),
   });
 
   const authUrl = new URL(GOOGLE_AUTH_URL);
   authUrl.searchParams.set('client_id', getServerConfig().googleClientId);
-  authUrl.searchParams.set('redirect_uri', getDriveCallbackUrl());
+  authUrl.searchParams.set('redirect_uri', callbackUrl);
   authUrl.searchParams.set('response_type', 'code');
   authUrl.searchParams.set('access_type', 'offline');
   authUrl.searchParams.set('prompt', 'consent');
@@ -621,7 +625,7 @@ export async function connectDriveForAuthorizedUser(
   return await persistDriveConnection(user, userJwt, tokens, existingDocument);
 }
 
-export async function handleDriveOAuthCallback(params: URLSearchParams) {
+export async function handleDriveOAuthCallback(params: URLSearchParams, callbackUrlOverride?: string) {
   const error = params.get('error');
   const code = params.get('code');
   const state = params.get('state');
@@ -632,7 +636,8 @@ export async function handleDriveOAuthCallback(params: URLSearchParams) {
 
   const parsedState = decodeOAuthState(state);
 
-  const buildDestination = (status: 'success' | 'error', message?: string) => {
+    const buildDestination = (status: 'success' | 'error', message?: string) => {
+    const callbackBaseUrl = new URL(callbackUrlOverride || parsedState.callbackUrl || getDriveCallbackUrl()).origin;
     if (parsedState.platform === 'mobile') {
       if (!parsedState.mobileRedirectUri) {
         throw new DriveRequestError(400, 'Missing mobile redirect URI for Google Drive.');
@@ -644,7 +649,7 @@ export async function handleDriveOAuthCallback(params: URLSearchParams) {
       });
     }
 
-    const destination = new URL(parsedState.redirectPath || '/cloud', getServerConfig().appUrl);
+    const destination = new URL(parsedState.redirectPath || '/cloud', callbackBaseUrl);
     destination.searchParams.set('drive', status === 'success' ? 'connected' : 'error');
     if (message) {
       destination.searchParams.set('message', message);
@@ -668,7 +673,12 @@ export async function handleDriveOAuthCallback(params: URLSearchParams) {
       throw new DriveRequestError(404, 'MindSafe user record was not found for this Google Drive connection.');
     }
 
-    await connectDriveForAuthorizedUser(user, parsedState.userJwt, code, getDriveCallbackUrl());
+    await connectDriveForAuthorizedUser(
+      user,
+      parsedState.userJwt,
+      code,
+      callbackUrlOverride || parsedState.callbackUrl || getDriveCallbackUrl(),
+    );
     return buildDestination('success');
   } catch (callbackError) {
     const message = callbackError instanceof Error ? callbackError.message : 'drive_connection_failed';
