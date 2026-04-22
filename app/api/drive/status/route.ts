@@ -6,8 +6,8 @@ export const runtime = 'nodejs';
 
 export async function GET(request: Request) {
   try {
-    const { user, userJwt } = await requireAuthorizedMindSafeUser(request);
-    const status = await getDriveStatusForUser(user, userJwt);
+    const { userJwt } = await requireAuthorizedMindSafeUser(request);
+    const status = await getDriveStatusForUser(userJwt);
     return NextResponse.json(status);
   } catch (error) {
     const status = error instanceof DriveRequestError ? error.status : 500;

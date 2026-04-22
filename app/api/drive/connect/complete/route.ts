@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
   try {
-    const { user, userJwt, account } = await requireAuthorizedMindSafeUser(request);
+    const { user, userJwt } = await requireAuthorizedMindSafeUser(request);
     const body = await request.json();
     const code = typeof body.code === 'string' ? body.code : '';
 
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     }
 
     const redirectUri = typeof body.redirectUri === 'string' ? body.redirectUri : getDriveCallbackUrl();
-    const status = await connectDriveForAuthorizedUser(user, userJwt, account.$id, code, redirectUri);
+    const status = await connectDriveForAuthorizedUser(user, userJwt, code, redirectUri);
     return NextResponse.json(status);
   } catch (error) {
     const status = error instanceof DriveRequestError ? error.status : 500;

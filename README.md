@@ -21,31 +21,12 @@ GOOGLE_DRIVE_TOKEN_SECRET=replace-with-a-long-random-secret
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-Optional if you want to override the default hardcoded Appwrite ids:
-
-```bash
-APPWRITE_DRIVE_CONNECTION_COLLECTION_ID=drive_connection_collection_id
-```
-
 Google OAuth must allow:
 
 - `http://localhost:3000/api/drive/connect/callback` for local development
 - `https://your-domain/api/drive/connect/callback` for production
 
-Create the Drive connection collection with:
-
-```bash
-npm run setup:drive
-```
-
-That setup script is the only place that needs Appwrite admin envs:
-
-```bash
-APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
-APPWRITE_PROJECT_ID=...
-APPWRITE_API_KEY=...
-APPWRITE_DATABASE_ID=...
-```
+Drive connection state is stored in the signed-in Appwrite account preferences, so no extra Appwrite collection or admin env vars are needed for runtime.
 
 If coupon and trial collections are also needed:
 

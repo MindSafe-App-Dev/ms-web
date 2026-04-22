@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Cloud, Folder, Link2Off, CheckCircle2, Camera, Mic, MessageSquare, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Cloud, Folder, Link2Off, CheckCircle2, Camera, Mic, MessageSquare, RefreshCw } from 'lucide-react';
 
 import { useNotification } from '@/context/NotificationProvider';
 import { disconnectDrive, getDriveStatus, startDriveConnection } from '@/lib/drive-client';
@@ -39,6 +39,7 @@ export default function CloudPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [isConnecting, setIsConnecting] = useState(false);
     const [isDisconnecting, setIsDisconnecting] = useState(false);
+    const [loadError, setLoadError] = useState('');
 
     const driveMessage = useMemo(() => searchParams.get('message'), [searchParams]);
     const driveState = useMemo(() => searchParams.get('drive'), [searchParams]);
@@ -52,24 +53,36 @@ export default function CloudPage() {
     }, [driveMessage, driveState, showError, showSuccess]);
 
     useEffect(() => {
+        let isActive = true;
+
         const loadStatus = async () => {
             try {
                 setIsLoading(true);
                 const nextStatus = await getDriveStatus();
+                if (!isActive) return;
                 setStatus(nextStatus);
+                setLoadError('');
             } catch (error) {
-                showError('Drive Unavailable', error instanceof Error ? error.message : 'Unable to load Google Drive status.');
+                if (!isActive) return;
+                setLoadError(error instanceof Error ? error.message : 'Unable to load Google Drive status.');
             } finally {
-                setIsLoading(false);
+                if (isActive) {
+                    setIsLoading(false);
+                }
             }
         };
 
-        loadStatus();
-    }, [showError]);
+        void loadStatus();
+
+        return () => {
+            isActive = false;
+        };
+    }, []);
 
     const handleConnect = async () => {
         try {
             setIsConnecting(true);
+            setLoadError('');
             const { authUrl } = await startDriveConnection({ platform: 'web', redirectPath: '/cloud' });
             window.location.href = authUrl;
         } catch (error) {
@@ -87,6 +100,7 @@ export default function CloudPage() {
                     setIsDisconnecting(true);
                     const nextStatus = await disconnectDrive();
                     setStatus(nextStatus);
+                    setLoadError('');
                     showSuccess('Drive Disconnected', 'Google Drive has been disconnected from this account.');
                 } catch (error) {
                     showError('Disconnect Failed', error instanceof Error ? error.message : 'Unable to disconnect Google Drive.');
@@ -151,6 +165,18 @@ export default function CloudPage() {
                                 </div>
                             </div>
                         </div>
+
+                        {loadError && (
+                            <div className="rounded-2xl border border-amber-400/25 bg-amber-500/10 px-4 py-4 text-amber-100">
+                                <div className="flex items-start gap-3">
+                                    <AlertTriangle className="w-5 h-5 mt-0.5 text-amber-200 shrink-0" />
+                                    <div>
+                                        <p className="font-semibold mb-1">Drive status unavailable</p>
+                                        <p className="text-sm leading-6 text-amber-50/90">{loadError}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         <div className="flex flex-wrap gap-3">
                             <button

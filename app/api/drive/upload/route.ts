@@ -9,7 +9,7 @@ const DRIVE_FEATURES: DriveFeature[] = ['audio', 'camera', 'sms'];
 
 export async function POST(request: Request) {
   try {
-    const { user, userJwt } = await requireAuthorizedMindSafeUser(request);
+    const { userJwt } = await requireAuthorizedMindSafeUser(request);
     const formData = await request.formData();
 
     const deviceName = String(formData.get('deviceName') || '').trim();
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       throw new DriveRequestError(400, 'Missing upload file for Google Drive.');
     }
 
-    const result = await uploadDriveFileForUser(user, userJwt, {
+    const result = await uploadDriveFileForUser(userJwt, {
       deviceName,
       feature,
       fileName,

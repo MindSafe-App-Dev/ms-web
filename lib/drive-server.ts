@@ -1,4 +1,4 @@
-import { ID, Permission, Query, Role } from 'appwrite';
+import { Query } from 'appwrite';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 
 import { appwriteConfig, type User } from '@/lib/appwrite';
@@ -12,6 +12,7 @@ const GOOGLE_DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/file
 const DRIVE_ROOT_FOLDER_NAME = 'MindSafe';
 const DRIVE_CALLBACK_PATH = '/api/drive/connect/callback';
 const DRIVE_FEATURES: DriveFeature[] = ['audio', 'camera', 'sms'];
+const DRIVE_PREFS_KEY = 'mindsafeDriveConnection';
 const STATE_MAX_AGE_MS = 10 * 60 * 1000;
 const ACCESS_TOKEN_REFRESH_WINDOW_MS = 60 * 1000;
 const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder';
@@ -27,8 +28,6 @@ interface DriveStatePayload {
 }
 
 interface DriveConnectionDocument {
-  $id: string;
-  user_id: string;
   account_id: string;
   google_email?: string;
   refresh_token_encrypted: string;
@@ -44,6 +43,11 @@ interface DriveConnectionDocument {
 interface AppwriteAccount {
   $id: string;
   email?: string;
+}
+
+interface AppwritePreferences {
+  [key: string]: unknown;
+  mindsafeDriveConnection?: DriveConnectionDocument | null;
 }
 
 interface DriveFileRecord {
@@ -102,7 +106,6 @@ const getServerConfig = () => {
     endpoint: process.env.APPWRITE_ENDPOINT || appwriteConfig.endpoint,
     projectId: process.env.APPWRITE_PROJECT_ID || appwriteConfig.projectId,
     databaseId: process.env.APPWRITE_DATABASE_ID || appwriteConfig.databaseId,
-    driveCollectionId: process.env.APPWRITE_DRIVE_CONNECTION_COLLECTION_ID || 'drive_connection_collection_id',
     googleClientId,
     googleClientSecret,
     tokenSecret,
@@ -236,6 +239,28 @@ async function resolveAccountFromJwt(userJwt: string) {
   return await parseResponseOrThrow(response, 'Unable to resolve the current Appwrite account.') as AppwriteAccount;
 }
 
+async function getAccountPreferences(userJwt: string) {
+  return await appwriteRequest<AppwritePreferences>(
+    '/account/prefs',
+    userJwt,
+    { method: 'GET' },
+  );
+}
+
+async function updateAccountPreferences(userJwt: string, updater: (prefs: AppwritePreferences) => AppwritePreferences) {
+  const currentPrefs = await getAccountPreferences(userJwt);
+  const nextPrefs = updater(currentPrefs || {});
+
+  return await appwriteRequest<{ prefs?: AppwritePreferences }>(
+    '/account/prefs',
+    userJwt,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ prefs: nextPrefs }),
+    },
+  );
+}
+
 async function findMindSafeUserByAccountId(accountId: string, userJwt: string) {
   const result = await appwriteRequest<{ documents: User[] }>(
     `/databases/${getServerConfig().databaseId}/collections/${appwriteConfig.userCollectionId}/documents`,
@@ -247,57 +272,31 @@ async function findMindSafeUserByAccountId(accountId: string, userJwt: string) {
   return result.documents[0] || null;
 }
 
-async function getDriveConnectionDocument(userId: string, userJwt: string) {
-  const result = await appwriteRequest<{ documents: DriveConnectionDocument[] }>(
-    `/databases/${getServerConfig().databaseId}/collections/${getServerConfig().driveCollectionId}/documents`,
-    userJwt,
-    { method: 'GET' },
-    [Query.equal('user_id', userId), Query.limit(1)],
-  );
+async function getDriveConnectionDocument(userJwt: string) {
+  const prefs = await getAccountPreferences(userJwt);
+  const record = prefs?.[DRIVE_PREFS_KEY];
 
-  return result.documents[0] || null;
+  if (!record || typeof record !== 'object' || Array.isArray(record)) {
+    return null;
+  }
+
+  return record as DriveConnectionDocument;
 }
 
-async function createDriveConnectionDocument(
-  data: Record<string, unknown>,
-  userJwt: string,
-  accountId: string,
-) {
-  return await appwriteRequest<DriveConnectionDocument>(
-    `/databases/${getServerConfig().databaseId}/collections/${getServerConfig().driveCollectionId}/documents`,
-    userJwt,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        documentId: ID.unique(),
-        data,
-        permissions: [
-          Permission.read(Role.user(accountId)),
-          Permission.update(Role.user(accountId)),
-          Permission.delete(Role.user(accountId)),
-        ],
-      }),
-    },
-  );
-}
+async function saveDriveConnectionDocument(userJwt: string, document: DriveConnectionDocument | null) {
+  await updateAccountPreferences(userJwt, (currentPrefs) => {
+    const nextPrefs = { ...(currentPrefs || {}) };
 
-async function updateDriveConnectionDocument(documentId: string, data: Record<string, unknown>, userJwt: string) {
-  return await appwriteRequest<DriveConnectionDocument>(
-    `/databases/${getServerConfig().databaseId}/collections/${getServerConfig().driveCollectionId}/documents/${documentId}`,
-    userJwt,
-    {
-      method: 'PATCH',
-      body: JSON.stringify({ data }),
-    },
-  );
-}
+    if (document) {
+      nextPrefs[DRIVE_PREFS_KEY] = document;
+    } else {
+      delete nextPrefs[DRIVE_PREFS_KEY];
+    }
 
-async function deleteDriveConnectionDocument(documentId: string, userJwt: string) {
-  return await appwriteRequest<Record<string, never>>(
-    `/databases/${getServerConfig().databaseId}/collections/${getServerConfig().driveCollectionId}/documents/${documentId}`,
-    userJwt,
-    { method: 'DELETE' },
-  );
+    return nextPrefs;
+  });
+
+  return document;
 }
 
 const decodeIdTokenEmail = (idToken?: string) => {
@@ -472,7 +471,6 @@ function createMultipartBody(metadata: Record<string, unknown>, fileBuffer: Buff
 async function persistDriveConnection(
   user: User,
   userJwt: string,
-  accountId: string,
   tokens: GoogleTokenResponse,
   existingDocument?: DriveConnectionDocument | null,
 ) {
@@ -491,7 +489,6 @@ async function persistDriveConnection(
   );
 
   const payload = {
-    user_id: user.$id,
     account_id: user.accountId,
     google_email: accountEmail || '',
     refresh_token_encrypted: encryptValue(refreshToken),
@@ -504,9 +501,7 @@ async function persistDriveConnection(
     last_sync_at: existingDocument?.last_sync_at || null,
   };
 
-  const nextDocument = existingDocument
-    ? await updateDriveConnectionDocument(existingDocument.$id, payload, userJwt)
-    : await createDriveConnectionDocument(payload, userJwt, accountId);
+  const nextDocument = await saveDriveConnectionDocument(userJwt, payload);
 
   return buildDriveStatus(nextDocument);
 }
@@ -524,17 +519,18 @@ async function resolveFreshAccessToken(document: DriveConnectionDocument, userJw
   }
 
   const refreshed = await refreshAccessToken(decryptValue(document.refresh_token_encrypted));
-  const nextDocument = await updateDriveConnectionDocument(document.$id, {
+  const nextDocument = await saveDriveConnectionDocument(userJwt, {
+    ...document,
     access_token_encrypted: encryptValue(refreshed.access_token),
     token_expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(),
     status: 'connected',
-  }, userJwt);
+  });
 
   return { accessToken: refreshed.access_token, connection: nextDocument };
 }
 
-async function requireDriveConnection(user: User, userJwt: string) {
-  const document = await getDriveConnectionDocument(user.$id, userJwt);
+async function requireDriveConnection(userJwt: string) {
+  const document = await getDriveConnectionDocument(userJwt);
   if (!document || document.status !== 'connected') {
     throw new DriveRequestError(400, 'Google Drive is not connected for this account.');
   }
@@ -585,8 +581,8 @@ export async function requireAuthorizedMindSafeUser(request: Request) {
   return { user, userJwt: jwtMatch[1], account };
 }
 
-export async function getDriveStatusForUser(user: User, userJwt: string) {
-  const document = await getDriveConnectionDocument(user.$id, userJwt);
+export async function getDriveStatusForUser(userJwt: string) {
+  const document = await getDriveConnectionDocument(userJwt);
   return buildDriveStatus(document);
 }
 
@@ -617,13 +613,12 @@ export async function startDriveConnection(userJwt: string, options: StartDriveC
 export async function connectDriveForAuthorizedUser(
   user: User,
   userJwt: string,
-  accountId: string,
   code: string,
   redirectUri: string,
 ) {
-  const existingDocument = await getDriveConnectionDocument(user.$id, userJwt);
+  const existingDocument = await getDriveConnectionDocument(userJwt);
   const tokens = await exchangeAuthorizationCode(code, redirectUri);
-  return await persistDriveConnection(user, userJwt, accountId, tokens, existingDocument);
+  return await persistDriveConnection(user, userJwt, tokens, existingDocument);
 }
 
 export async function handleDriveOAuthCallback(params: URLSearchParams) {
@@ -673,7 +668,7 @@ export async function handleDriveOAuthCallback(params: URLSearchParams) {
       throw new DriveRequestError(404, 'MindSafe user record was not found for this Google Drive connection.');
     }
 
-    await connectDriveForAuthorizedUser(user, parsedState.userJwt, account.$id, code, getDriveCallbackUrl());
+    await connectDriveForAuthorizedUser(user, parsedState.userJwt, code, getDriveCallbackUrl());
     return buildDestination('success');
   } catch (callbackError) {
     const message = callbackError instanceof Error ? callbackError.message : 'drive_connection_failed';
@@ -681,8 +676,8 @@ export async function handleDriveOAuthCallback(params: URLSearchParams) {
   }
 }
 
-export async function disconnectDriveForUser(user: User, userJwt: string) {
-  const document = await getDriveConnectionDocument(user.$id, userJwt);
+export async function disconnectDriveForUser(userJwt: string) {
+  const document = await getDriveConnectionDocument(userJwt);
   if (!document) {
     return buildDriveStatus(null);
   }
@@ -696,12 +691,12 @@ export async function disconnectDriveForUser(user: User, userJwt: string) {
     }
   }
 
-  await deleteDriveConnectionDocument(document.$id, userJwt);
+  await saveDriveConnectionDocument(userJwt, null);
   return buildDriveStatus(null);
 }
 
-export async function uploadDriveFileForUser(user: User, userJwt: string, input: UploadDriveFileInput): Promise<DriveUploadResult> {
-  const { accessToken, connection } = await requireDriveConnection(user, userJwt);
+export async function uploadDriveFileForUser(userJwt: string, input: UploadDriveFileInput): Promise<DriveUploadResult> {
+  const { accessToken, connection } = await requireDriveConnection(userJwt);
   const safeDeviceName = sanitizeSegment(input.deviceName);
   const featureFolderName = getFeatureFolderName(input.feature);
 
@@ -729,10 +724,11 @@ export async function uploadDriveFileForUser(user: User, userJwt: string, input:
     },
   );
 
-  await updateDriveConnectionDocument(connection.$id, {
+  await saveDriveConnectionDocument(userJwt, {
+    ...connection,
     last_sync_at: new Date().toISOString(),
     status: 'connected',
-  }, userJwt);
+  });
 
   return {
     fileId: uploadedFile.id,
