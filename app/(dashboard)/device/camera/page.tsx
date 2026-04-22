@@ -5,9 +5,10 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { consumeTrialAccess } from '@/lib/appwrite';
+import { uploadDriveFile } from '@/lib/drive-client';
 import { buildPremiumRoute, PREMIUM_TRIAL_FEATURE_IDS } from '@/lib/premium';
 import { initSocket, sendCommand, onResult, COMMANDS, disconnectSocket } from '@/lib/socket';
-import { Camera as CameraIcon, ArrowLeft, Download, Share2, CheckCircle } from 'lucide-react';
+import { Camera as CameraIcon, ArrowLeft, Download, Share2, CheckCircle, CloudUpload } from 'lucide-react';
 
 export default function CameraPage() {
     const searchParams = useSearchParams();
@@ -23,6 +24,7 @@ export default function CameraPage() {
     const [isCapturing, setIsCapturing] = useState(false);
     const [capturedImage, setCapturedImage] = useState<string | null>(null);
     const [isSaved, setIsSaved] = useState(false);
+    const [isUploading, setIsUploading] = useState(false);
     const [trialConsumed, setTrialConsumed] = useState(false);
 
     const ensureTrialOnFirstUse = async () => {
@@ -115,6 +117,30 @@ export default function CameraPage() {
         }
     };
 
+    const handleDriveUpload = async () => {
+        if (!capturedImage) return;
+
+        try {
+            setIsUploading(true);
+            const blob = await fetch(capturedImage).then((response) => response.blob());
+            const fileName = `MindSafe_${deviceName}_${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`;
+
+            await uploadDriveFile({
+                deviceName,
+                feature: 'camera',
+                fileName,
+                mimeType: blob.type || 'image/jpeg',
+                file: blob,
+            });
+
+            showSuccess('Uploaded to Drive', 'Camera capture uploaded to Google Drive.');
+        } catch (error) {
+            showError('Drive Upload Failed', error instanceof Error ? error.message : 'Unable to upload the image to Google Drive.');
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
     return (
         <div className="max-w-4xl mx-auto">
             {/* Header */}
@@ -203,7 +229,7 @@ export default function CameraPage() {
                     </div>
 
                     {/* Action Buttons */}
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <button
                             onClick={handleSave}
                             className={`py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all ${isSaved
@@ -229,6 +255,17 @@ export default function CameraPage() {
                         >
                             <Share2 className="w-5 h-5" />
                             Share
+                        </button>
+                        <button
+                            onClick={handleDriveUpload}
+                            disabled={isUploading}
+                            className={`py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all ${isUploading
+                                ? 'bg-gray-600 text-gray-300 cursor-not-allowed'
+                                : 'bg-emerald-500 hover:bg-emerald-600 text-white'
+                                }`}
+                        >
+                            <CloudUpload className={`w-5 h-5 ${isUploading ? 'animate-pulse' : ''}`} />
+                            {isUploading ? 'Uploading...' : 'Upload to Drive'}
                         </button>
                     </div>
                 </div>

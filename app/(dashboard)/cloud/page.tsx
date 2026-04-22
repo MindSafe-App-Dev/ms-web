@@ -1,137 +1,200 @@
 'use client';
 
-import { useState } from 'react';
-import { useNotification } from '@/context/NotificationProvider';
-import { Cloud, Shield, Share2, Monitor, DollarSign, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Cloud, Folder, Link2Off, CheckCircle2, Camera, Mic, MessageSquare, RefreshCw } from 'lucide-react';
 
-const features = [
-    { id: 1, title: 'Secure Storage', description: 'Your data is protected with top-notch encryption.', icon: Shield },
-    { id: 2, title: 'Easy Sharing', description: 'Share files effortlessly with your friends and family.', icon: Share2 },
-    { id: 3, title: 'Cross-Platform', description: 'Access your files from any device, anywhere.', icon: Monitor },
-    { id: 4, title: 'Affordable Plans', description: 'Choose a plan that suits your needs and budget.', icon: DollarSign },
+import { useNotification } from '@/context/NotificationProvider';
+import { disconnectDrive, getDriveStatus, startDriveConnection } from '@/lib/drive-client';
+
+const FEATURES = [
+    {
+        id: 'audio',
+        title: 'Audio uploads',
+        description: 'Send captured microphone recordings into a device-specific Drive folder.',
+        icon: Mic,
+    },
+    {
+        id: 'camera',
+        title: 'Camera uploads',
+        description: 'Keep remote camera captures organized by device and feature automatically.',
+        icon: Camera,
+    },
+    {
+        id: 'sms',
+        title: 'SMS exports',
+        description: 'Upload CSV exports from the SMS screen directly into Google Drive.',
+        icon: MessageSquare,
+    },
 ];
 
 export default function CloudPage() {
-    const { showSuccess } = useNotification();
-    const [currentIndex, setCurrentIndex] = useState(0);
-    const [isLoading, setIsLoading] = useState(false);
+    const searchParams = useSearchParams();
+    const { showConfirm, showError, showInfo, showSuccess } = useNotification();
+    const [status, setStatus] = useState({
+        connected: false,
+        accountEmail: '',
+        rootFolderName: 'MindSafe',
+    });
+    const [isLoading, setIsLoading] = useState(true);
+    const [isConnecting, setIsConnecting] = useState(false);
+    const [isDisconnecting, setIsDisconnecting] = useState(false);
 
-    const handleNotify = () => {
-        setIsLoading(true);
-        setTimeout(() => {
-            showSuccess('Notification Set', "You'll be notified when we launch!");
-            setIsLoading(false);
-        }, 1000);
-    };
+    const driveMessage = useMemo(() => searchParams.get('message'), [searchParams]);
+    const driveState = useMemo(() => searchParams.get('drive'), [searchParams]);
 
-    const scrollToIndex = (direction: 'next' | 'prev') => {
-        if (direction === 'next' && currentIndex < features.length - 1) {
-            setCurrentIndex(currentIndex + 1);
-        } else if (direction === 'prev' && currentIndex > 0) {
-            setCurrentIndex(currentIndex - 1);
+    useEffect(() => {
+        if (driveState === 'connected') {
+            showSuccess('Drive Connected', 'Google Drive is ready for audio, camera, and SMS uploads.');
+        } else if (driveState === 'error') {
+            showError('Drive Connection Failed', driveMessage || 'Unable to connect Google Drive.');
+        }
+    }, [driveMessage, driveState, showError, showSuccess]);
+
+    useEffect(() => {
+        const loadStatus = async () => {
+            try {
+                setIsLoading(true);
+                const nextStatus = await getDriveStatus();
+                setStatus(nextStatus);
+            } catch (error) {
+                showError('Drive Unavailable', error instanceof Error ? error.message : 'Unable to load Google Drive status.');
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        loadStatus();
+    }, [showError]);
+
+    const handleConnect = async () => {
+        try {
+            setIsConnecting(true);
+            const { authUrl } = await startDriveConnection({ platform: 'web', redirectPath: '/cloud' });
+            window.location.href = authUrl;
+        } catch (error) {
+            showError('Connect Failed', error instanceof Error ? error.message : 'Unable to connect Google Drive.');
+            setIsConnecting(false);
         }
     };
 
-    return (
-        <div className="max-w-4xl mx-auto">
-            {/* Hero Section */}
-            <div className="relative rounded-3xl overflow-hidden mb-8" style={{ height: '40vh', minHeight: '300px' }}>
-                {/* Background Image */}
-                <div
-                    className="absolute inset-0 bg-cover bg-center"
-                    style={{
-                        backgroundImage: 'url(https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRRzvB427U-5yu1NXMb84iU_LVbxQVKYq5SI0daZhxl3fcPG_ON_wplOQ85Sku-shzdgm8&usqp=CAU)',
-                    }}
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#1a0b2e] via-[#1a0b2e]/50 to-transparent" />
+    const handleDisconnect = () => {
+        showConfirm(
+            'Disconnect Drive',
+            'This will stop new uploads to Google Drive until you reconnect the account.',
+            async () => {
+                try {
+                    setIsDisconnecting(true);
+                    const nextStatus = await disconnectDrive();
+                    setStatus(nextStatus);
+                    showSuccess('Drive Disconnected', 'Google Drive has been disconnected from this account.');
+                } catch (error) {
+                    showError('Disconnect Failed', error instanceof Error ? error.message : 'Unable to disconnect Google Drive.');
+                } finally {
+                    setIsDisconnecting(false);
+                }
+            }
+        );
+    };
 
-                {/* Content */}
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-8">
-                    <Cloud className="w-16 h-16 text-purple-400 mb-4" />
-                    <h1 className="text-4xl md:text-5xl font-bold text-purple-900 mb-6">
-                        Coming Soon
-                    </h1>
-                    <button
-                        onClick={handleNotify}
-                        disabled={isLoading}
-                        className="ms-btn ms-btn-primary"
-                    >
-                        {isLoading ? (
-                            <div className="flex items-center gap-2">
-                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                Processing...
+    return (
+        <div className="max-w-5xl mx-auto">
+            <div className="rounded-3xl border border-white/10 bg-[linear-gradient(135deg,rgba(139,92,246,0.28),rgba(236,72,153,0.18),rgba(14,165,233,0.12))] p-[1px] mb-8">
+                <div className="rounded-[calc(1.5rem-1px)] bg-[#1a0b2e]/95 p-8 md:p-10">
+                    <div className="flex flex-col gap-6">
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold border ${status.connected ? 'bg-emerald-500/15 text-emerald-200 border-emerald-400/30' : 'bg-red-500/15 text-red-200 border-red-400/30'}`}>
+                                {status.connected ? <CheckCircle2 className="w-4 h-4" /> : <Link2Off className="w-4 h-4" />}
+                                {status.connected ? 'Connected' : 'Not connected'}
                             </div>
-                        ) : (
-                            'Notify Me'
-                        )}
-                    </button>
+                            {(isLoading || isConnecting || isDisconnecting) && (
+                                <div className="inline-flex items-center gap-2 text-sm text-gray-300">
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                    Working...
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="max-w-3xl">
+                            <div className="inline-flex items-center gap-2 rounded-full bg-white/5 px-4 py-2 text-sm font-semibold text-white/80 border border-white/10 mb-4">
+                                <Cloud className="w-4 h-4 text-orange-300" />
+                                MindSafe cloud
+                            </div>
+                            <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">Google Drive sync</h1>
+                            <p className="text-base md:text-lg text-gray-300 leading-8">
+                                Connect Drive once, then upload audio captures, remote camera photos, and SMS exports into
+                                <span className="text-white font-semibold"> MindSafe / Device / Feature</span> folders.
+                            </p>
+                        </div>
+
+                        <div className="grid md:grid-cols-2 gap-4">
+                            <div className="ms-card p-5">
+                                <div className="flex items-start gap-4">
+                                    <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center">
+                                        <Folder className="w-6 h-6 text-white" />
+                                    </div>
+                                    <div>
+                                        <p className="text-sm uppercase tracking-[0.2em] text-gray-400 mb-1">Root folder</p>
+                                        <p className="text-white text-lg font-semibold">{status.rootFolderName || 'MindSafe'}</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="ms-card p-5">
+                                <div className="flex items-start gap-4">
+                                    <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center">
+                                        <Cloud className="w-6 h-6 text-white" />
+                                    </div>
+                                    <div>
+                                        <p className="text-sm uppercase tracking-[0.2em] text-gray-400 mb-1">Connected account</p>
+                                        <p className="text-white text-lg font-semibold">{status.accountEmail || 'No account linked yet'}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-3">
+                            <button
+                                onClick={handleConnect}
+                                disabled={isLoading || isConnecting || isDisconnecting}
+                                className="px-5 py-3 rounded-2xl gradient-primary text-white font-semibold hover:opacity-90 transition-opacity disabled:opacity-60"
+                            >
+                                {status.connected ? 'Reconnect Drive' : 'Connect Google Drive'}
+                            </button>
+                            {status.connected && (
+                                <button
+                                    onClick={handleDisconnect}
+                                    disabled={isDisconnecting}
+                                    className="px-5 py-3 rounded-2xl bg-white/10 border border-white/10 text-white font-semibold hover:bg-white/15 transition-colors disabled:opacity-60"
+                                >
+                                    Disconnect
+                                </button>
+                            )}
+                            {!status.connected && (
+                                <button
+                                    onClick={() => showInfo('How uploads work', 'Connect Drive here, then use Upload to Drive on the audio, camera, and SMS pages.')}
+                                    className="px-5 py-3 rounded-2xl bg-white/5 border border-white/10 text-gray-200 font-semibold hover:bg-white/10 transition-colors"
+                                >
+                                    How it works
+                                </button>
+                            )}
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            {/* Features Section */}
-            <div className="mb-8">
-                {/* Header with Navigation */}
-                <div className="flex items-center justify-between mb-6">
-                    <button
-                        onClick={() => scrollToIndex('prev')}
-                        disabled={currentIndex === 0}
-                        className={`p-3 rounded-full ms-card transition-all ${currentIndex === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-purple-500/20'
-                            }`}
-                    >
-                        <ChevronLeft className={`w-5 h-5 ${currentIndex === 0 ? 'text-gray-500' : 'text-purple-400'}`} />
-                    </button>
-
-                    <h2 className="text-xl font-semibold text-white">What to Expect</h2>
-
-                    <button
-                        onClick={() => scrollToIndex('next')}
-                        disabled={currentIndex === features.length - 1}
-                        className={`p-3 rounded-full ms-card transition-all ${currentIndex === features.length - 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-purple-500/20'
-                            }`}
-                    >
-                        <ChevronRight className={`w-5 h-5 ${currentIndex === features.length - 1 ? 'text-gray-500' : 'text-purple-400'}`} />
-                    </button>
-                </div>
-
-                {/* Feature Cards */}
-                <div className="overflow-hidden">
-                    <div
-                        className="flex transition-transform duration-300 ease-out"
-                        style={{ transform: `translateX(-${currentIndex * 100}%)` }}
-                    >
-                        {features.map((feature) => {
-                            const Icon = feature.icon;
-                            return (
-                                <div
-                                    key={feature.id}
-                                    className="w-full flex-shrink-0 px-2"
-                                >
-                                    <div className="ms-card p-8 text-center">
-                                        <div className="w-16 h-16 rounded-full gradient-primary flex items-center justify-center mx-auto mb-4">
-                                            <Icon className="w-8 h-8 text-white" />
-                                        </div>
-                                        <h3 className="text-xl font-semibold text-white mb-3">{feature.title}</h3>
-                                        <p className="text-gray-400">{feature.description}</p>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-
-                {/* Dots */}
-                <div className="flex justify-center gap-2 mt-6">
-                    {features.map((_, index) => (
-                        <button
-                            key={index}
-                            onClick={() => setCurrentIndex(index)}
-                            className={`h-2 rounded-full transition-all ${index === currentIndex
-                                    ? 'w-6 gradient-primary'
-                                    : 'w-2 bg-purple-500/30'
-                                }`}
-                        />
-                    ))}
-                </div>
+            <div className="grid md:grid-cols-3 gap-4">
+                {FEATURES.map((feature) => {
+                    const Icon = feature.icon;
+                    return (
+                        <div key={feature.id} className="ms-card p-6">
+                            <div className="w-14 h-14 rounded-2xl gradient-primary flex items-center justify-center mb-4">
+                                <Icon className="w-7 h-7 text-white" />
+                            </div>
+                            <h2 className="text-xl font-semibold text-white mb-3">{feature.title}</h2>
+                            <p className="text-gray-400 leading-7">{feature.description}</p>
+                        </div>
+                    );
+                })}
             </div>
         </div>
     );

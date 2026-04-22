@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "setup:billing": "node scripts/setup-appwrite-billing-collections.mjs",
+    "setup:drive": "node scripts/setup-drive-collection.mjs",
     "seed:coupons": "node scripts/seed-coupons.mjs"
   },
   "dependencies": {

@@ -10,7 +10,7 @@ import { initSocket, sendCommand, onResult, COMMANDS, disconnectSocket, SocketRe
 import { formatDuration, exportToCSV, getCallTypeInfo } from '@/lib/utils';
 import {
     Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed,
-    ArrowLeft, Download, RefreshCw, Search, X
+    ArrowLeft, Clock, Download, RefreshCw, Search, X
 } from 'lucide-react';
 
 interface Call {
@@ -19,7 +19,79 @@ interface Call {
     name: string;
     duration: number;
     type: number;
+    timestampLabel: string | null;
 }
+
+type RawCall = Record<string, unknown>;
+
+const getCallTimestampLabel = (call: RawCall): string | null => {
+    const directCandidates = [
+        call.timestamp,
+        call.timeStamp,
+        call.dateTime,
+        call.datetime,
+        call.callTimestamp,
+        call.callTime,
+        call.createdAt,
+        call.created_at,
+    ];
+
+    const datePart = typeof call.date === 'string' ? call.date.trim() : '';
+    const timePart = typeof call.time === 'string' ? call.time.trim() : '';
+    if (datePart && timePart) {
+        directCandidates.unshift(`${datePart} ${timePart}`);
+    } else if (datePart) {
+        directCandidates.unshift(datePart);
+    } else if (timePart) {
+        directCandidates.unshift(timePart);
+    }
+
+    const rawValue = directCandidates.find(
+        (value) => value !== undefined && value !== null && String(value).trim() !== ''
+    );
+
+    if (rawValue === undefined || rawValue === null) {
+        return null;
+    }
+
+    if (typeof rawValue === 'number' || /^\d+$/.test(String(rawValue))) {
+        const numericValue = Number(rawValue);
+        if (!Number.isNaN(numericValue)) {
+            const millis = numericValue < 1e12 ? numericValue * 1000 : numericValue;
+            const parsedDate = new Date(millis);
+            if (!Number.isNaN(parsedDate.getTime())) {
+                return parsedDate.toLocaleString();
+            }
+        }
+    }
+
+    const parsedDate = new Date(String(rawValue));
+    if (!Number.isNaN(parsedDate.getTime())) {
+        return parsedDate.toLocaleString();
+    }
+
+    return String(rawValue);
+};
+
+const normalizeCall = (call: unknown, idx: number): Call | null => {
+    if (!call || typeof call !== 'object') {
+        return null;
+    }
+
+    const rawCall = call as RawCall;
+    if (!rawCall.phoneNo || rawCall.duration === undefined || rawCall.type === undefined) {
+        return null;
+    }
+
+    return {
+        id: `${idx}-${String(rawCall.phoneNo)}-${Date.now()}`,
+        phoneNo: String(rawCall.phoneNo || 'Unknown'),
+        name: String(rawCall.name || 'Unknown'),
+        duration: Number(rawCall.duration) || 0,
+        type: Number(rawCall.type) || 2,
+        timestampLabel: getCallTimestampLabel(rawCall),
+    };
+};
 
 export default function CallsPage() {
     const searchParams = useSearchParams();
@@ -75,13 +147,9 @@ export default function CallsPage() {
             }
 
             if (callsArray && Array.isArray(callsArray)) {
-                const processed = callsArray.map((call, idx) => ({
-                    id: `${idx}-${call.phoneNo}-${Date.now()}`,
-                    phoneNo: String(call.phoneNo || 'Unknown'),
-                    name: String(call.name || 'Unknown'),
-                    duration: Number(call.duration) || 0,
-                    type: Number(call.type) || 2,
-                }));
+                const processed = callsArray
+                    .map((call, idx) => normalizeCall(call, idx))
+                    .filter((call): call is Call => Boolean(call));
                 setCalls(processed);
                 setIsLoading(false);
                 showSuccess('Call Logs Updated', `Loaded ${processed.length} calls`);
@@ -119,9 +187,10 @@ export default function CallsPage() {
             calls.map(c => ({
                 ...c,
                 typeLabel: getCallTypeInfo(c.type).label,
+                timestamp: c.timestampLabel || '',
             })),
-            ['Name', 'Phone Number', 'Duration (seconds)', 'Call Type'],
-            ['name', 'phoneNo', 'duration', 'typeLabel'],
+            ['Name', 'Phone Number', 'Duration (seconds)', 'Call Type', 'Timestamp'],
+            ['name', 'phoneNo', 'duration', 'typeLabel', 'timestamp'],
             `CallLogs_${new Date().toISOString().split('T')[0]}.csv`
         );
         showSuccess('Exported', 'Call logs saved as CSV');
@@ -267,6 +336,12 @@ export default function CallsPage() {
                                         <Phone className="w-3 h-3" />
                                         <span className="truncate">{call.phoneNo}</span>
                                     </div>
+                                    {call.timestampLabel ? (
+                                        <div className="flex items-center gap-1.5 text-gray-400 text-sm mb-2">
+                                            <Clock className="w-3 h-3" />
+                                            <span className="truncate">{call.timestampLabel}</span>
+                                        </div>
+                                    ) : null}
                                     <span
                                         className="text-xs font-semibold px-3 py-1 rounded-full"
                                         style={{

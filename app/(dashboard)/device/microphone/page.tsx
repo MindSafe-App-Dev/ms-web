@@ -5,9 +5,10 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { consumeTrialAccess } from '@/lib/appwrite';
+import { uploadDriveFile } from '@/lib/drive-client';
 import { buildPremiumRoute, PREMIUM_TRIAL_FEATURE_IDS } from '@/lib/premium';
 import { initSocket, sendCommand, onResult, disconnectSocket, SocketResult } from '@/lib/socket';
-import { Mic, ArrowLeft, Play, Square, Download, Share2, CheckCircle, Clock, Radio } from 'lucide-react';
+import { Mic, ArrowLeft, Play, Square, Download, Share2, CheckCircle, Clock, Radio, CloudUpload } from 'lucide-react';
 
 // Microphone command (different from camera command)
 const MICROPHONE_COMMAND = 'x0000mc';
@@ -41,8 +42,40 @@ export default function MicrophonePage() {
     const [recordedAudio, setRecordedAudio] = useState<string | null>(null);
     const [audioFileName, setAudioFileName] = useState<string>('');
     const [isSaved, setIsSaved] = useState(false);
+    const [isUploading, setIsUploading] = useState(false);
     const [trialConsumed, setTrialConsumed] = useState(false);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+    const getRecordingBlob = async (): Promise<Blob | null> => {
+        if (!recordedAudio) return null;
+
+        try {
+            const response = await fetch(recordedAudio);
+            return await response.blob();
+        } catch (error) {
+            console.error('Audio blob error:', error);
+            showError('Download Failed', 'Unable to prepare the recording file.');
+            return null;
+        }
+    };
+
+    const downloadBlob = (blob: Blob, fileName: string): boolean => {
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = fileName;
+        link.rel = 'noopener';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        const opened = typeof window !== 'undefined'
+            && /iPad|iPhone|iPod|Android/i.test(window.navigator.userAgent)
+            && window.open(blobUrl, '_blank', 'noopener,noreferrer');
+
+        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+        return Boolean(opened) || 'download' in HTMLAnchorElement.prototype;
+    };
 
     const ensureTrialOnFirstUse = async () => {
         if (isPremium) return true;
@@ -171,16 +204,16 @@ export default function MicrophonePage() {
         return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     };
 
-    const handleSave = () => {
+    const handleSave = async () => {
         if (!recordedAudio) return;
 
-        // Create download link
-        const link = document.createElement('a');
-        link.href = recordedAudio;
-        link.download = audioFileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        const blob = await getRecordingBlob();
+        if (!blob) return;
+
+        const didStartDownload = downloadBlob(blob, audioFileName);
+        if (!didStartDownload) {
+            showInfo('Open Recording', 'Your browser opened the recording in a new tab so you can save it.');
+        }
 
         setIsSaved(true);
         showSuccess('Audio Saved', 'Recording has been downloaded');
@@ -190,16 +223,54 @@ export default function MicrophonePage() {
         if (!recordedAudio) return;
 
         try {
-            if (navigator.share) {
-                const blob = await fetch(recordedAudio).then(r => r.blob());
-                const file = new File([blob], audioFileName, { type: 'audio/mp4' });
-                await navigator.share({ files: [file] });
-            } else {
-                await navigator.clipboard.writeText('Audio recording from MindSafe');
-                showInfo('Copied', 'Recording info copied to clipboard');
+            const blob = await getRecordingBlob();
+            if (!blob) return;
+
+            const mimeType = blob.type || 'audio/mp4';
+            const file = new File([blob], audioFileName, { type: mimeType });
+
+            if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+                await navigator.share({
+                    files: [file],
+                    title: audioFileName,
+                    text: 'Audio recording from MindSafe',
+                });
+                showSuccess('Share Ready', 'Opened your device share sheet.');
+                return;
             }
+
+            downloadBlob(blob, audioFileName);
+            showInfo('Share Unsupported', 'Your browser cannot share files directly, so the recording download has started.');
         } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                return;
+            }
             console.error('Share error:', error);
+            showError('Share Failed', 'Unable to share this recording on this device.');
+        }
+    };
+
+    const handleDriveUpload = async () => {
+        if (!recordedAudio) return;
+
+        try {
+            setIsUploading(true);
+            const blob = await getRecordingBlob();
+            if (!blob) return;
+
+            await uploadDriveFile({
+                deviceName,
+                feature: 'audio',
+                fileName: audioFileName,
+                mimeType: blob.type || 'audio/mp4',
+                file: blob,
+            });
+
+            showSuccess('Uploaded to Drive', 'Audio recording uploaded to Google Drive.');
+        } catch (error) {
+            showError('Drive Upload Failed', error instanceof Error ? error.message : 'Unable to upload the recording to Google Drive.');
+        } finally {
+            setIsUploading(false);
         }
     };
 
@@ -321,7 +392,7 @@ export default function MicrophonePage() {
                     </div>
 
                     {/* Action Buttons */}
-                    <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
                         <button
                             onClick={handleSave}
                             className={`py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all ${isSaved
@@ -347,6 +418,17 @@ export default function MicrophonePage() {
                         >
                             <Share2 className="w-5 h-5" />
                             Share
+                        </button>
+                        <button
+                            onClick={handleDriveUpload}
+                            disabled={isUploading}
+                            className={`py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all ${isUploading
+                                ? 'bg-gray-600 text-gray-300 cursor-not-allowed'
+                                : 'bg-emerald-500 hover:bg-emerald-600 text-white'
+                                }`}
+                        >
+                            <CloudUpload className={`w-5 h-5 ${isUploading ? 'animate-pulse' : ''}`} />
+                            {isUploading ? 'Uploading...' : 'Upload to Drive'}
                         </button>
                     </div>
 
