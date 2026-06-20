@@ -10,11 +10,28 @@ export const appwriteConfig = {
   paymentCollectionId: "66f8107a00211893d145",
   couponCollectionId: process.env.NEXT_PUBLIC_APPWRITE_COUPON_COLLECTION_ID || 'coupon_collection_id',
   trialCollectionId: process.env.NEXT_PUBLIC_APPWRITE_TRIAL_COLLECTION_ID || 'trial_collection_id',
+  packageCollectionId: process.env.NEXT_PUBLIC_APPWRITE_PACKAGE_COLLECTION_ID || 'package_collection_id',
+  adminSettingsCollectionId: process.env.NEXT_PUBLIC_APPWRITE_ADMIN_SETTINGS_COLLECTION_ID || 'admin_settings_collection_id',
 };
 
 const client = new Client()
   .setEndpoint(appwriteConfig.endpoint)
   .setProject(appwriteConfig.projectId);
+
+const getPasswordRecoveryUrl = () => {
+  const configuredUrl = process.env.NEXT_PUBLIC_PASSWORD_RECOVERY_URL || process.env.NEXT_PUBLIC_APP_URL;
+  if (!configuredUrl) return '';
+
+  try {
+    const url = new URL(configuredUrl);
+    if (url.pathname === '/' || url.pathname === '') {
+      url.pathname = '/reset-password';
+    }
+    return url.toString();
+  } catch {
+    return configuredUrl;
+  }
+};
 
 export const account = new Account(client);
 export const databases = new Databases(client);
@@ -36,16 +53,48 @@ export interface Child {
   victime_name: string;
   victim_id: string;
   is_Premium: boolean;
+  premium_id?: string | null;
+  ending_date?: string | null;
 }
 
 export interface Payment {
   $id: string;
+  $createdAt?: string;
   client_id: string;
   device_name: string;
   device_id: string;
   date: string;
   amount: number;
   status: boolean;
+  package_id?: string;
+  package_name?: string;
+}
+
+export interface AdminPackage {
+  $id: string;
+  slug: string;
+  name: string;
+  description?: string;
+  price: number;
+  cadence: string;
+  child_limit?: number;
+  features?: string[];
+  is_active: boolean;
+  coupon_enabled?: boolean;
+  display_order?: number;
+  badge?: string;
+  trial_duration?: number;
+  trial_duration_unit?: string;
+  trial_fallback_slug?: string;
+}
+
+export interface AdminSetting {
+  $id: string;
+  key: string;
+  value: string;
+  is_active: boolean;
+  updated_by?: string;
+  updated_at?: string;
 }
 
 export interface Coupon {
@@ -196,11 +245,52 @@ export async function updateUserPassword(newPassword: string, oldPassword: strin
   }
 }
 
+export async function listActiveSessions() {
+  try {
+    return await account.listSessions();
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Unable to load active sessions');
+  }
+}
+
+export async function removeSessionWithPassword(sessionId: string, password: string) {
+  try {
+    if (!sessionId) {
+      throw new Error('Session ID is required.');
+    }
+    if (!password) {
+      throw new Error('Password is required to remove a device.');
+    }
+
+    const currentAccount = await account.get();
+    try {
+      await account.updateEmail(currentAccount.email, password);
+    } catch (error) {
+      const message = String(error instanceof Error ? error.message : '').toLowerCase();
+      const noChangeError = message.includes('same') || message.includes('already') || message.includes('no change');
+      if (!noChangeError) {
+        throw error;
+      }
+    }
+    return await account.deleteSession(sessionId);
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Unable to remove this session');
+  }
+}
+
 export async function requestPasswordRecovery(email: string) {
   try {
-    return await account.createRecovery(email, '');
+    return await account.createRecovery(email, getPasswordRecoveryUrl());
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : 'Password recovery failed');
+  }
+}
+
+export async function completePasswordRecovery(userId: string, secret: string, password: string) {
+  try {
+    return await account.updateRecovery(userId, secret, password);
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Password reset failed');
   }
 }
 
@@ -229,25 +319,63 @@ export async function createChild(form: { client_id: string; victim_name: string
   return newChild as unknown as Child;
 }
 
-export async function updateChild(id: string): Promise<Child> {
+export async function updateChild(id: string, isPremium: boolean = true, premiumId: string | null = null, endingDate: string | null = null): Promise<Child> {
   const updatedChild = await databases.updateDocument(
     appwriteConfig.databaseId,
     appwriteConfig.childCollectionId,
     id,
-    { is_Premium: true }
+    { 
+      is_Premium: isPremium,
+      premium_id: premiumId,
+      ending_date: endingDate
+    }
   );
 
   return updatedChild as unknown as Child;
 }
 
 export async function getAllChild(accountId: string): Promise<Child[]> {
-  const children = await databases.listDocuments(
+  const childrenDocs = await databases.listDocuments(
     appwriteConfig.databaseId,
     appwriteConfig.childCollectionId,
     [Query.equal('client_id', accountId)]
   );
 
-  return children.documents as unknown as Child[];
+  const children = childrenDocs.documents as unknown as Child[];
+  const now = new Date().getTime();
+  let packages: AdminPackage[] | null = null;
+
+  for (let child of children) {
+    if (child.is_Premium && child.ending_date) {
+      if (new Date(child.ending_date).getTime() < now) {
+        if (!packages) {
+          packages = await getActivePackages().catch(() => []);
+        }
+        const trialPlan = packages.find(p => p.slug === child.premium_id);
+        const fallbackSlug = trialPlan?.trial_fallback_slug || 'free';
+        
+        try {
+          await databases.updateDocument(
+            appwriteConfig.databaseId,
+            appwriteConfig.childCollectionId,
+            child.$id,
+            {
+              is_Premium: false,
+              premium_id: fallbackSlug,
+              ending_date: null
+            }
+          );
+          child.is_Premium = false;
+          child.premium_id = fallbackSlug;
+          child.ending_date = null;
+        } catch (err) {
+          console.error(`Failed to expire child ${child.$id} on client:`, err);
+        }
+      }
+    }
+  }
+
+  return children;
 }
 
 export async function createPayment(form: {
@@ -257,6 +385,8 @@ export async function createPayment(form: {
   date: string;
   amount: number;
   status: boolean;
+  package_id?: string;
+  package_name?: string;
 }): Promise<boolean> {
   try {
     await databases.createDocument(
@@ -279,6 +409,40 @@ export async function getAllPayments(accountId: string): Promise<Payment[]> {
   );
 
   return payments.documents as unknown as Payment[];
+}
+
+export async function getActivePackages(): Promise<AdminPackage[]> {
+  try {
+    const result = await databases.listDocuments(
+      appwriteConfig.databaseId,
+      appwriteConfig.packageCollectionId,
+      [Query.equal('is_active', true), Query.orderAsc('display_order'), Query.limit(100)]
+    );
+
+    return result.documents as unknown as AdminPackage[];
+  } catch {
+    return [];
+  }
+}
+
+export async function getAdminSetting(key: string): Promise<AdminSetting | null> {
+  try {
+    const result = await databases.listDocuments(
+      appwriteConfig.databaseId,
+      appwriteConfig.adminSettingsCollectionId,
+      [Query.equal('key', key), Query.equal('is_active', true), Query.limit(1)]
+    );
+
+    return (result.documents[0] as unknown as AdminSetting) || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getActiveServerUrl(): Promise<string> {
+  const fallbackUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+  const setting = await getAdminSetting('server_url');
+  return (setting?.value || fallbackUrl).trim().replace(/\/$/, '');
 }
 
 export async function getCoupons(): Promise<Coupon[]> {

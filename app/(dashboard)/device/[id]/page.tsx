@@ -1,8 +1,11 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotification } from '@/context/NotificationProvider';
-import { buildPremiumRoute } from '@/lib/premium';
+import { useGlobalContext } from '@/context/GlobalProvider';
+import { buildPremiumRoute, isFeatureEnabledForPlan } from '@/lib/premium';
+import { getAllPayments, getActivePackages } from '@/lib/appwrite';
 import Link from 'next/link';
 import {
     Camera, Mic, Phone, Users, MessageSquare, MapPin, Folder,
@@ -23,20 +26,64 @@ export default function DeviceOptionsPage() {
     const searchParams = useSearchParams();
     const router = useRouter();
     const { showInfo } = useNotification();
+    const { user } = useGlobalContext();
 
     const deviceName = searchParams.get('name') || 'Unknown Device';
     const deviceId = searchParams.get('deviceId') || '';
     const isPremiumParam = searchParams.get('isPremium');
     const isPremium = isPremiumParam === 'true' || isPremiumParam === 'True' || isPremiumParam === '1';
 
+    const [planFeatures, setPlanFeatures] = useState<string[] | undefined>(undefined);
+    const [checkingPlan, setCheckingPlan] = useState(true);
+
+    useEffect(() => {
+        const checkPlanFeatures = async () => {
+            if (!user?.$id || !deviceId || !isPremium) {
+                setCheckingPlan(false);
+                return;
+            }
+            try {
+                const [payments, packages] = await Promise.all([
+                    getAllPayments(user.$id),
+                    getActivePackages(),
+                ]);
+
+                const devicePayments = payments
+                    .filter((p) => p.device_id === deviceId && (p.status === true || String(p.status).toLowerCase() === 'true'))
+                    .sort((a, b) => new Date(b.date || b.$createdAt || 0).getTime() - new Date(a.date || a.$createdAt || 0).getTime());
+
+                const latestPayment = devicePayments[0];
+                if (latestPayment && latestPayment.package_id) {
+                    const activePlan = packages.find((pkg) => pkg.slug === latestPayment.package_id);
+                    if (activePlan) {
+                        setPlanFeatures(activePlan.features);
+                    }
+                }
+            } catch (err) {
+                console.error('Error fetching plan features:', err);
+            } finally {
+                setCheckingPlan(false);
+            }
+        };
+
+        checkPlanFeatures();
+    }, [user, deviceId, isPremium]);
+
     const handleFeatureClick = async (feature: typeof features[0]) => {
-        const isLocked = feature.premium && !isPremium;
+        const isLockedByFree = feature.premium && !isPremium;
+        const isLockedByPlan = isPremium && !checkingPlan && planFeatures !== undefined && !isFeatureEnabledForPlan(planFeatures, feature.id);
+        const isLocked = isLockedByFree || isLockedByPlan;
 
         if (isLocked) {
-            showInfo('Trial Mode', `${feature.title} trial is counted when you perform an action in that tool.`);
+            if (isLockedByPlan) {
+                showInfo('Upgrade Plan', `Your current plan features list does not include ${feature.title}. Please upgrade to a plan that enables this feature.`);
+                return;
+            } else {
+                showInfo('Trial Mode', `${feature.title} trial is counted when you perform an action in that tool.`);
+            }
         }
 
-        router.push(`/device/${feature.id}?name=${encodeURIComponent(deviceName)}&deviceId=${deviceId}&isPremium=${isPremium ? 'true' : 'false'}`);
+        router.push(`/device/${feature.id}?name=${encodeURIComponent(deviceName)}&deviceId=${deviceId}&isPremium=${isPremium && !isLockedByPlan ? 'true' : 'false'}`);
     };
 
     return (
@@ -79,7 +126,9 @@ export default function DeviceOptionsPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                 {features.map((feature) => {
-                    const isLocked = feature.premium && !isPremium;
+                    const isLockedByFree = feature.premium && !isPremium;
+                    const isLockedByPlan = isPremium && !checkingPlan && planFeatures !== undefined && !isFeatureEnabledForPlan(planFeatures, feature.id);
+                    const isLocked = isLockedByFree || isLockedByPlan;
                     const Icon = feature.icon;
 
                     return (
@@ -87,7 +136,7 @@ export default function DeviceOptionsPage() {
                             key={feature.id}
                             onClick={() => handleFeatureClick(feature)}
                             className={`ms-card p-5 text-left transition-all ${isLocked
-                                ? 'bg-gray-800/40 border-gray-700/30'
+                                ? 'bg-gray-800/40 border-gray-700/30 opacity-75'
                                 : 'ms-card-hover'
                                 }`}
                         >
@@ -112,8 +161,8 @@ export default function DeviceOptionsPage() {
                                 </p>
 
                                 {isLocked && (
-                                    <div className="px-3 py-1 rounded-full bg-gray-700/30 border border-gray-600/30">
-                                        <span className="text-gray-400 text-xs font-semibold">Premium</span>
+                                    <div className={`px-3 py-1 rounded-full border ${isLockedByPlan ? 'bg-amber-500/15 border-amber-500/30 text-amber-300' : 'bg-gray-700/30 border-gray-600/30 text-gray-400'} text-xs font-semibold`}>
+                                        {isLockedByPlan ? 'Plan Restricted' : 'Premium'}
                                     </div>
                                 )}
                             </div>

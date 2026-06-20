@@ -55,7 +55,7 @@ export default function ContactsPage() {
         showConnection(true, 'Connected to device');
 
         onResult((data: SocketResult) => {
-            let contactsArray: unknown[] | null = null;
+            let contactsArray: any[] | null = null;
 
             if (data.contacts?.contactsList) {
                 contactsArray = data.contacts.contactsList;
@@ -63,7 +63,7 @@ export default function ContactsPage() {
                 if (Array.isArray(data.contactsList)) {
                     contactsArray = data.contactsList;
                 } else if (typeof data.contactsList === 'object' && data.contactsList && 'contactsList' in data.contactsList) {
-                    const nested = (data.contactsList as { contactsList?: unknown[] }).contactsList;
+                    const nested = (data.contactsList as { contactsList?: any[] }).contactsList;
                     if (Array.isArray(nested)) {
                         contactsArray = nested;
                     }

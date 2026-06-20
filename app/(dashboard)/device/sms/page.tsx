@@ -71,13 +71,13 @@ export default function SmsPage() {
         showConnection(true, 'Connected to device');
 
         onResult((data: SocketResult) => {
-            let smsArray: unknown[] | null = null;
+            let smsArray: any[] | null = null;
 
             if (data.smsList) {
                 if (Array.isArray(data.smsList)) {
                     smsArray = data.smsList;
                 } else if (typeof data.smsList === 'object' && data.smsList && 'smsList' in data.smsList) {
-                    const nested = (data.smsList as { smsList?: unknown[] }).smsList;
+                    const nested = (data.smsList as { smsList?: any[] }).smsList;
                     if (Array.isArray(nested)) {
                         smsArray = nested;
                     }

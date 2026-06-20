@@ -1,9 +1,9 @@
 import { io, Socket } from 'socket.io-client';
-
-const SOCKET_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+import { getActiveServerUrl } from './appwrite';
 
 let socket: Socket | null = null;
 let connectionPromise: Promise<Socket> | null = null;
+let resultCallback: ((data: SocketResult) => void) | null = null;
 
 export interface CommandData {
     userId: string;
@@ -65,19 +65,10 @@ export interface SocketResult {
     audio?: boolean;
 }
 
-export function initSocket(userId: string): Socket {
-    // If already connected with same user, return existing socket
-    if (socket?.connected) {
-        return socket;
-    }
+async function createSocket(userId: string): Promise<Socket> {
+    const socketUrl = await getActiveServerUrl();
 
-    // Clean up existing socket if any
-    if (socket) {
-        socket.disconnect();
-        socket = null;
-    }
-
-    socket = io(SOCKET_URL, {
+    const nextSocket = io(socketUrl, {
         query: {
             id: userId,
             type: 'controller',
@@ -89,20 +80,44 @@ export function initSocket(userId: string): Socket {
         timeout: 20000,
     });
 
-    socket.on('connect', () => {
-        console.log('Socket connected:', socket?.id);
+    nextSocket.on('connect', () => {
+        console.log('Socket connected:', nextSocket.id);
     });
 
-    socket.on('disconnect', (reason) => {
+    nextSocket.on('disconnect', (reason) => {
         console.log('Socket disconnected:', reason);
-        // Auto-reconnect on server disconnect
-        if (reason === 'io server disconnect' && socket) {
-            socket.connect();
+        if (reason === 'io server disconnect') {
+            nextSocket.connect();
         }
     });
 
-    socket.on('connect_error', (error) => {
+    nextSocket.on('connect_error', (error) => {
         console.error('Socket connection error:', error.message);
+    });
+
+    if (resultCallback) {
+        nextSocket.off('result');
+        nextSocket.on('result', resultCallback);
+    }
+
+    socket = nextSocket;
+    return nextSocket;
+}
+
+export function initSocket(userId: string): Socket | null {
+    // If already connected with same user, return existing socket
+    if (socket?.connected) {
+        return socket;
+    }
+
+    // Clean up existing socket if any
+    if (socket) {
+        socket.disconnect();
+        socket = null;
+    }
+
+    connectionPromise = createSocket(userId).finally(() => {
+        connectionPromise = null;
     });
 
     return socket;
@@ -131,15 +146,20 @@ export function sendCommand(commandData: CommandData): boolean {
         return true;
     } else {
         console.error('Socket not connected. Attempting to reconnect...');
-        // Try to reconnect
         if (socket) {
             socket.connect();
+        } else if (connectionPromise) {
+            connectionPromise.then((connectedSocket) => {
+                connectedSocket.emit('command', commandData);
+                console.log('Command sent after connection:', commandData);
+            });
         }
         return false;
     }
 }
 
 export function onResult(callback: (data: SocketResult) => void): void {
+    resultCallback = callback;
     if (socket) {
         socket.off('result');
         socket.on('result', callback);

@@ -1,11 +1,13 @@
 import {
   createPayment,
+  getActivePackages,
   incrementCouponRedemption,
+  type AdminPackage,
   type CouponValidationResult,
   updateChild,
 } from './appwrite';
 
-export type PremiumPlanId = 'free' | 'monthly' | 'yearly' | 'premium';
+export type PremiumPlanId = string;
 
 export interface PremiumPlan {
   id: PremiumPlanId;
@@ -25,11 +27,14 @@ export interface PremiumPlan {
     paymentNotes: string[];
   };
   popular?: boolean;
+  trial_duration?: number;
+  trial_duration_unit?: string;
+  trial_fallback_slug?: string;
 }
 
 export interface PremiumComparisonRow {
   label: string;
-  values: Record<PremiumPlanId, string>;
+  values: Record<string, string>;
 }
 
 export interface StoredPayPalOrder {
@@ -216,6 +221,52 @@ export const PREMIUM_PLANS: PremiumPlan[] = [
   },
 ];
 
+const PLAN_ACCENTS: Record<string, [string, string]> = {
+  free: ['#6b7280', '#4b5563'],
+  monthly: ['#22c55e', '#16a34a'],
+  yearly: ['#a855f7', '#ec4899'],
+  premium: ['#f59e0b', '#f97316'],
+};
+
+export function mergeAdminPackagesWithPremiumPlans(packages: AdminPackage[]): PremiumPlan[] {
+  if (!packages.length) return PREMIUM_PLANS;
+
+  const fallbackById = new Map(PREMIUM_PLANS.map((plan) => [plan.id, plan]));
+  return packages.map((adminPlan, index) => {
+    const fallback = fallbackById.get(adminPlan.slug) || PREMIUM_PLANS[index] || PREMIUM_PLANS[0];
+    const price = Number(adminPlan.price || 0);
+
+    return {
+      ...fallback,
+      id: adminPlan.slug,
+      name: adminPlan.name || fallback.name,
+      price,
+      cadence: adminPlan.cadence || fallback.cadence,
+      shortLabel: adminPlan.badge || fallback.shortLabel,
+      badge: adminPlan.badge || fallback.badge,
+      description: adminPlan.description || fallback.description,
+      priceLabel: formatCurrency(price),
+      accent: PLAN_ACCENTS[adminPlan.slug] || fallback.accent,
+      features: adminPlan.features?.length ? adminPlan.features : fallback.features,
+      popular: adminPlan.slug === 'yearly' || fallback.popular,
+      trial_duration: adminPlan.trial_duration,
+      trial_duration_unit: adminPlan.trial_duration_unit,
+      trial_fallback_slug: adminPlan.trial_fallback_slug,
+      details: {
+        whatYouGet: adminPlan.features?.length ? adminPlan.features : fallback.details.whatYouGet,
+        bestFor: [adminPlan.description || fallback.description, adminPlan.badge || fallback.shortLabel].filter(Boolean),
+        accessLevel: fallback.details.accessLevel,
+        paymentNotes: [formatCurrency(price), adminPlan.cadence || fallback.cadence].filter(Boolean),
+      },
+    };
+  });
+}
+
+export async function getRuntimePremiumPlans() {
+  const packages = await getActivePackages();
+  return mergeAdminPackagesWithPremiumPlans(packages);
+}
+
 export const PREMIUM_TRIAL_FEATURE_IDS = {
   camera: 'camera',
   microphone: 'microphone',
@@ -275,6 +326,8 @@ export async function finalizePremiumCheckout(order: StoredPayPalOrder) {
     date: new Date().toISOString(),
     amount: order.amount,
     status: true,
+    package_id: order.planId,
+    package_name: order.planName,
   });
 
   if (!paymentCreated) {
@@ -285,7 +338,46 @@ export async function finalizePremiumCheckout(order: StoredPayPalOrder) {
     await incrementCouponRedemption(order.couponId, (order.couponRedemptionCount || 0) + 1);
   }
 
-  await updateChild(order.deviceDocumentId);
+  await updateChild(order.deviceDocumentId, true, order.planId, null);
+}
+
+export async function activateFreeTrialCheckout(
+  userId: string,
+  deviceDocumentId: string,
+  deviceExternalId: string,
+  deviceName: string,
+  plan: PremiumPlan
+) {
+  const duration = plan.trial_duration || 7;
+  const unit = (plan.trial_duration_unit || 'days').toLowerCase();
+  const now = new Date();
+  
+  if (unit === 'days') {
+    now.setDate(now.getDate() + duration);
+  } else if (unit === 'weeks') {
+    now.setDate(now.getDate() + duration * 7);
+  } else if (unit === 'months') {
+    now.setMonth(now.getMonth() + duration);
+  } else if (unit === 'hours') {
+    now.setHours(now.getHours() + duration);
+  }
+  
+  const paymentCreated = await createPayment({
+    client_id: userId,
+    device_name: deviceName,
+    device_id: deviceExternalId,
+    date: new Date().toISOString(),
+    amount: 0,
+    status: true,
+    package_id: plan.id,
+    package_name: plan.name,
+  });
+
+  if (!paymentCreated) {
+    throw new Error(PREMIUM_COPY.paymentFailedMessage);
+  }
+
+  await updateChild(deviceDocumentId, true, plan.id, now.toISOString());
 }
 
 export function getPayPalCompletionKey(orderId: string) {
@@ -339,4 +431,24 @@ export function markPayPalOrderCompleted(orderId: string) {
   }
 
   window.localStorage.setItem(getPayPalCompletionKey(orderId), '1');
+}
+
+export function isFeatureEnabledForPlan(planFeatures: string[] | undefined, featureSlug: string): boolean {
+  if (!planFeatures) return false;
+  
+  const features = planFeatures.map(f => f.toLowerCase());
+  
+  if (features.some(f => f.includes('all monitoring') || f.includes('all tools') || f.includes('complete access'))) {
+    return true;
+  }
+  
+  if (featureSlug === 'location' && features.some(f => f.includes('location'))) return true;
+  if (featureSlug === 'camera' && features.some(f => f.includes('camera'))) return true;
+  if (featureSlug === 'microphone' && features.some(f => f.includes('mic') || f.includes('micro'))) return true;
+  if (featureSlug === 'calls' && features.some(f => f.includes('call') || f.includes('phone'))) return true;
+  if (featureSlug === 'contacts' && features.some(f => f.includes('contact') || f.includes('user'))) return true;
+  if (featureSlug === 'sms' && features.some(f => f.includes('sms') || f.includes('message'))) return true;
+  if (featureSlug === 'files' && features.some(f => f.includes('file') || f.includes('folder'))) return true;
+  
+  return features.some(f => f.includes(featureSlug.toLowerCase()));
 }

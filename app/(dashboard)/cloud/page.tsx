@@ -31,7 +31,11 @@ const FEATURES = [
 export default function CloudPage() {
     const searchParams = useSearchParams();
     const { showConfirm, showError, showInfo, showSuccess } = useNotification();
-    const [status, setStatus] = useState({
+    const [status, setStatus] = useState<{
+        connected: boolean;
+        accountEmail?: string;
+        rootFolderName?: string;
+    }>({
         connected: false,
         accountEmail: '',
         rootFolderName: 'MindSafe',

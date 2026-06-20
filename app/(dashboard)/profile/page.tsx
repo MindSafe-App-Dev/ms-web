@@ -3,14 +3,37 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { useNotification } from '@/context/NotificationProvider';
-import { getAllChild, getAllPayments, requestPasswordRecovery, Child, Payment } from '@/lib/appwrite';
+import { getAllChild, getAllPayments, listActiveSessions, removeSessionWithPassword, requestPasswordRecovery, Child, Payment } from '@/lib/appwrite';
 import { maskEmail, formatDate } from '@/lib/utils';
 import {
     Smartphone, TrendingUp, Activity, Crown, CreditCard, Mail, Key, Send,
-    LogOut, RefreshCw
+    LogOut, RefreshCw, Monitor, Shield
 } from 'lucide-react';
 
 const tabs = ['Users', 'Billing', 'Settings', 'Support'];
+
+interface SessionLike {
+    $id: string;
+    expire?: string;
+    ip?: string;
+    osName?: string;
+    clientName?: string;
+    countryName?: string;
+    deviceName?: string;
+    deviceBrand?: string;
+    deviceModel?: string;
+    current?: boolean;
+}
+
+const getSessionTitle = (session: SessionLike) => {
+    const device = [session.deviceBrand, session.deviceModel].filter(Boolean).join(' ');
+    return device || session.deviceName || session.clientName || session.osName || 'Unknown device';
+};
+
+const getSessionSubtitle = (session: SessionLike) => {
+    const parts = [session.osName, session.clientName, session.countryName].filter(Boolean);
+    return parts.length ? parts.join(' | ') : 'Active session';
+};
 
 export default function ProfilePage() {
     const { user } = useGlobalContext();
@@ -19,8 +42,12 @@ export default function ProfilePage() {
     const [activeTab, setActiveTab] = useState('Users');
     const [devices, setDevices] = useState<Child[]>([]);
     const [payments, setPayments] = useState<Payment[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [sessions, setSessions] = useState<SessionLike[]>([]);
     const [refreshing, setRefreshing] = useState(false);
+    const [sessionsLoading, setSessionsLoading] = useState(false);
+    const [sessionToRemove, setSessionToRemove] = useState<SessionLike | null>(null);
+    const [sessionPassword, setSessionPassword] = useState('');
+    const [removingSessionId, setRemovingSessionId] = useState<string | null>(null);
 
     // Settings state
     const [resetEmail, setResetEmail] = useState('');
@@ -30,7 +57,19 @@ export default function ProfilePage() {
     const [supportMessage, setSupportMessage] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const fetchData = async () => {
+    const fetchSessions = useCallback(async () => {
+        setSessionsLoading(true);
+        try {
+            const response = await listActiveSessions();
+            setSessions((response.sessions || []) as SessionLike[]);
+        } catch (error) {
+            showError('Sessions Failed', error instanceof Error ? error.message : 'Unable to load active sessions.');
+        } finally {
+            setSessionsLoading(false);
+        }
+    }, [showError]);
+
+    const fetchData = useCallback(async () => {
         if (!user?.$id) return;
 
         try {
@@ -42,18 +81,17 @@ export default function ProfilePage() {
             setPayments(paymentsData);
         } catch (error) {
             console.error('Error fetching data:', error);
-        } finally {
-            setLoading(false);
         }
-    };
+    }, [user?.$id, user?.accountId]);
 
     useEffect(() => {
         fetchData();
-    }, [user?.$id]);
+        fetchSessions();
+    }, [fetchData, fetchSessions]);
 
     const handleRefresh = async () => {
         setRefreshing(true);
-        await fetchData();
+        await Promise.all([fetchData(), fetchSessions()]);
         setRefreshing(false);
     };
 
@@ -88,6 +126,43 @@ export default function ProfilePage() {
             showError('Submission Failed', error instanceof Error ? error.message : 'An error occurred.');
         } finally {
             setIsSubmitting(false);
+        }
+    };
+
+    const openSessionRemoval = (session: SessionLike) => {
+        if (session.current) {
+            showError('Current Device', 'Use logout to end this current session.');
+            return;
+        }
+
+        setSessionToRemove(session);
+        setSessionPassword('');
+    };
+
+    const closeSessionRemoval = () => {
+        setSessionToRemove(null);
+        setSessionPassword('');
+    };
+
+    const confirmSessionRemoval = async () => {
+        if (!sessionToRemove?.$id) return;
+        const trimmedPassword = sessionPassword.trim();
+
+        if (!trimmedPassword) {
+            showError('Password Required', 'Enter your password to remove this device.');
+            return;
+        }
+
+        setRemovingSessionId(sessionToRemove.$id);
+        try {
+            await removeSessionWithPassword(sessionToRemove.$id, trimmedPassword);
+            showSuccess('Device Removed', 'That session has been signed out.');
+            closeSessionRemoval();
+            await fetchSessions();
+        } catch (error) {
+            showError('Remove Failed', error instanceof Error ? error.message : 'Unable to remove this session.');
+        } finally {
+            setRemovingSessionId(null);
         }
     };
 
@@ -247,31 +322,94 @@ export default function ProfilePage() {
 
                 {/* Settings Tab */}
                 {activeTab === 'Settings' && (
-                    <div className="ms-card p-6">
-                        <h2 className="text-xl font-bold text-white mb-2">Reset Password</h2>
-                        <p className="text-gray-400 text-sm mb-6">Enter your email to receive reset instructions</p>
+                    <div className="space-y-5">
+                        <div className="ms-card p-6">
+                            <h2 className="text-xl font-bold text-white mb-2">Reset Password</h2>
+                            <p className="text-gray-400 text-sm mb-6">Enter your email to receive reset instructions</p>
 
-                        <div className="space-y-4">
-                            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[#2d1b4e] border border-purple-500/30">
-                                <Mail className="w-4 h-4 text-purple-400" />
-                                <input
-                                    type="email"
-                                    value={resetEmail}
-                                    onChange={(e) => setResetEmail(e.target.value)}
-                                    placeholder="Enter your email"
-                                    className="flex-1 bg-transparent text-white outline-none"
-                                />
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[#2d1b4e] border border-purple-500/30">
+                                    <Mail className="w-4 h-4 text-purple-400" />
+                                    <input
+                                        type="email"
+                                        value={resetEmail}
+                                        onChange={(e) => setResetEmail(e.target.value)}
+                                        placeholder="Enter your email"
+                                        className="flex-1 bg-transparent text-white outline-none"
+                                    />
+                                </div>
+
+                                <p className="text-gray-500 text-sm">Hint: {maskEmail(user?.email || '')}</p>
+
+                                <button
+                                    onClick={handlePasswordReset}
+                                    className="w-full py-3 rounded-xl gradient-primary text-white font-semibold flex items-center justify-center gap-2"
+                                >
+                                    <Key className="w-4 h-4" />
+                                    Reset Password
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="ms-card p-6">
+                            <div className="flex items-start justify-between gap-4 mb-5">
+                                <div>
+                                    <h2 className="text-xl font-bold text-white mb-2">Session Management</h2>
+                                    <p className="text-gray-400 text-sm">Manage devices currently signed in to your account.</p>
+                                </div>
+                                <button
+                                    onClick={fetchSessions}
+                                    disabled={sessionsLoading}
+                                    className="p-3 rounded-full bg-purple-500/15 border border-purple-500/30 disabled:opacity-60"
+                                >
+                                    <RefreshCw className={`w-4 h-4 text-purple-300 ${sessionsLoading ? 'animate-spin' : ''}`} />
+                                </button>
                             </div>
 
-                            <p className="text-gray-500 text-sm">Hint: {maskEmail(user?.email || '')}</p>
-
-                            <button
-                                onClick={handlePasswordReset}
-                                className="w-full py-3 rounded-xl gradient-primary text-white font-semibold flex items-center justify-center gap-2"
-                            >
-                                <Key className="w-4 h-4" />
-                                Reset Password
-                            </button>
+                            {sessionsLoading && !sessions.length ? (
+                                <div className="py-8 text-center text-gray-400">Loading active sessions...</div>
+                            ) : sessions.length ? (
+                                <div className="space-y-3">
+                                    {sessions.map((session) => (
+                                        <div key={session.$id} className="rounded-2xl bg-white/5 border border-white/10 p-4 flex items-center gap-4">
+                                            <div className="w-11 h-11 rounded-full bg-purple-500/15 flex items-center justify-center">
+                                                {session.current ? (
+                                                    <Smartphone className="w-5 h-5 text-purple-300" />
+                                                ) : (
+                                                    <Monitor className="w-5 h-5 text-purple-300" />
+                                                )}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <p className="font-semibold text-white truncate">{getSessionTitle(session)}</p>
+                                                    {session.current && (
+                                                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 text-[11px] font-semibold">
+                                                            Current
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <p className="text-gray-400 text-sm truncate">{getSessionSubtitle(session)}</p>
+                                                <p className="text-gray-500 text-xs truncate">
+                                                    IP {session.ip || 'Unknown'} | Expires {session.expire ? formatDate(session.expire) : 'Unknown'}
+                                                </p>
+                                            </div>
+                                            <button
+                                                onClick={() => openSessionRemoval(session)}
+                                                disabled={Boolean(session.current) || removingSessionId === session.$id}
+                                                className="p-3 rounded-full bg-red-500/15 border border-red-500/30 disabled:bg-white/5 disabled:border-white/10 disabled:opacity-50"
+                                            >
+                                                {removingSessionId === session.$id ? (
+                                                    <div className="w-4 h-4 border-2 border-red-300/30 border-t-red-300 rounded-full animate-spin" />
+                                                ) : (
+                                                    <LogOut className={`w-4 h-4 ${session.current ? 'text-gray-500' : 'text-red-300'}`} />
+                                                )}
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="py-8 text-center text-gray-400">No active sessions found.</div>
+                            )}
                         </div>
                     </div>
                 )}
@@ -332,6 +470,51 @@ export default function ProfilePage() {
                     </div>
                 )}
             </div>
+
+            {sessionToRemove && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+                    <div className="w-full max-w-md rounded-2xl bg-[#1a0b2e] border border-purple-500/30 p-6 shadow-2xl">
+                        <div className="w-12 h-12 rounded-full bg-red-500/15 border border-red-500/30 flex items-center justify-center mb-4">
+                            <Shield className="w-5 h-5 text-red-300" />
+                        </div>
+                        <h2 className="text-xl font-bold text-white mb-2">Remove device?</h2>
+                        <p className="text-gray-400 text-sm mb-5">
+                            Enter your account password to sign out {getSessionTitle(sessionToRemove)}.
+                        </p>
+
+                        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[#2d1b4e] border border-purple-500/30 mb-5">
+                            <Key className="w-4 h-4 text-purple-400" />
+                            <input
+                                type="password"
+                                value={sessionPassword}
+                                onChange={(event) => setSessionPassword(event.target.value)}
+                                placeholder="Account password"
+                                className="flex-1 bg-transparent text-white outline-none"
+                            />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                            <button
+                                onClick={closeSessionRemoval}
+                                className="py-3 rounded-xl bg-white/10 border border-white/10 text-white font-semibold"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmSessionRemoval}
+                                disabled={Boolean(removingSessionId)}
+                                className="py-3 rounded-xl bg-red-500 text-white font-semibold disabled:opacity-60 flex items-center justify-center"
+                            >
+                                {removingSessionId ? (
+                                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                ) : (
+                                    'Remove'
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

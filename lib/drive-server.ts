@@ -16,6 +16,7 @@ const DRIVE_PREFS_KEY = 'mindsafeDriveConnection';
 const STATE_MAX_AGE_MS = 10 * 60 * 1000;
 const ACCESS_TOKEN_REFRESH_WINDOW_MS = 60 * 1000;
 const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder';
+const DRIVE_RECONNECT_MESSAGE = 'Google Drive authorization expired. Please reconnect Google Drive and try the upload again.';
 
 type ConnectPlatform = 'web' | 'mobile';
 
@@ -181,14 +182,24 @@ const decodeOAuthState = (state: string): DriveStatePayload => {
   return parsed;
 };
 
-async function parseResponseOrThrow(response: Response, fallbackMessage: string) {
+async function parseResponseOrThrow<T = Record<string, unknown>>(response: Response, fallbackMessage: string): Promise<T> {
   const text = await response.text();
-  const payload = text ? JSON.parse(text) as Record<string, unknown> : {};
+  let payload: Record<string, unknown> = {};
+
+  if (text) {
+    try {
+      payload = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      payload = { error: text };
+    }
+  }
 
   if (!response.ok) {
     const message =
       typeof payload.message === 'string'
         ? payload.message
+        : typeof payload.error_description === 'string'
+          ? payload.error_description
         : typeof payload.error === 'string'
           ? payload.error
           : fallbackMessage;
@@ -196,8 +207,12 @@ async function parseResponseOrThrow(response: Response, fallbackMessage: string)
     throw new DriveRequestError(response.status, message);
   }
 
-  return payload;
+  return payload as T;
 }
+
+const isInvalidGrantError = (error: unknown) => (
+  error instanceof Error && /invalid_grant/i.test(error.message)
+);
 
 async function appwriteRequest<T>(
   path: string,
@@ -225,7 +240,7 @@ async function appwriteRequest<T>(
     headers,
   });
 
-  return await parseResponseOrThrow(response, 'Appwrite request failed.') as T;
+  return await parseResponseOrThrow<T>(response, 'Appwrite request failed.');
 }
 
 async function resolveAccountFromJwt(userJwt: string) {
@@ -238,7 +253,7 @@ async function resolveAccountFromJwt(userJwt: string) {
     cache: 'no-store',
   });
 
-  return await parseResponseOrThrow(response, 'Unable to resolve the current Appwrite account.') as AppwriteAccount;
+  return await parseResponseOrThrow<AppwriteAccount>(response, 'Unable to resolve the current Appwrite account.');
 }
 
 async function getAccountPreferences(userJwt: string) {
@@ -332,7 +347,7 @@ async function exchangeAuthorizationCode(code: string, redirectUri: string) {
     }),
   });
 
-  return await parseResponseOrThrow(response, 'Google Drive authorization failed.') as GoogleTokenResponse;
+  return await parseResponseOrThrow<GoogleTokenResponse>(response, 'Google Drive authorization failed.');
 }
 
 async function refreshAccessToken(refreshToken: string) {
@@ -350,7 +365,7 @@ async function refreshAccessToken(refreshToken: string) {
     }),
   });
 
-  return await parseResponseOrThrow(response, 'Unable to refresh the Google Drive access token.') as GoogleTokenResponse;
+  return await parseResponseOrThrow<GoogleTokenResponse>(response, 'Unable to refresh the Google Drive access token.');
 }
 
 async function revokeGoogleToken(token: string) {
@@ -392,7 +407,7 @@ async function driveApiRequest<T>(
     headers,
   });
 
-  return await parseResponseOrThrow(response, 'Google Drive request failed.') as T;
+  return await parseResponseOrThrow<T>(response, 'Google Drive request failed.');
 }
 
 async function findDriveFolder(name: string, parentId: string | null, accessToken: string) {
@@ -500,10 +515,10 @@ async function persistDriveConnection(
     root_folder_name: rootFolder.name,
     status: 'connected',
     connected_at: existingDocument?.connected_at || new Date().toISOString(),
-    last_sync_at: existingDocument?.last_sync_at || null,
+    last_sync_at: existingDocument?.last_sync_at || undefined,
   };
 
-  const nextDocument = await saveDriveConnectionDocument(userJwt, payload);
+  const nextDocument = await saveDriveConnectionDocument(userJwt, payload) as DriveConnectionDocument;
 
   return buildDriveStatus(nextDocument);
 }
@@ -520,13 +535,24 @@ async function resolveFreshAccessToken(document: DriveConnectionDocument, userJw
     return { accessToken: storedAccessToken, connection: document };
   }
 
-  const refreshed = await refreshAccessToken(decryptValue(document.refresh_token_encrypted));
+  let refreshed: GoogleTokenResponse;
+  try {
+    refreshed = await refreshAccessToken(decryptValue(document.refresh_token_encrypted));
+  } catch (error) {
+    if (isInvalidGrantError(error)) {
+      await saveDriveConnectionDocument(userJwt, null);
+      throw new DriveRequestError(401, DRIVE_RECONNECT_MESSAGE);
+    }
+
+    throw error;
+  }
+
   const nextDocument = await saveDriveConnectionDocument(userJwt, {
     ...document,
     access_token_encrypted: encryptValue(refreshed.access_token),
     token_expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(),
     status: 'connected',
-  });
+  }) as DriveConnectionDocument;
 
   return { accessToken: refreshed.access_token, connection: nextDocument };
 }
@@ -585,6 +611,19 @@ export async function requireAuthorizedMindSafeUser(request: Request) {
 
 export async function getDriveStatusForUser(userJwt: string) {
   const document = await getDriveConnectionDocument(userJwt);
+  if (document?.status === 'connected') {
+    try {
+      const { connection } = await resolveFreshAccessToken(document, userJwt);
+      return buildDriveStatus(connection);
+    } catch (error) {
+      if (isInvalidGrantError(error) || (error instanceof DriveRequestError && error.message === DRIVE_RECONNECT_MESSAGE)) {
+        return buildDriveStatus(null);
+      }
+
+      throw error;
+    }
+  }
+
   return buildDriveStatus(document);
 }
 

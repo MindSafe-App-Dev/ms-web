@@ -18,11 +18,13 @@ import {
     hasCompletedPayPalOrder,
     markPayPalOrderCompleted,
     PREMIUM_COPY,
-    PREMIUM_PLANS,
+    getRuntimePremiumPlans,
+    mergeAdminPackagesWithPremiumPlans,
     readPendingPayPalOrder,
     type PremiumPlanId,
     type StoredPayPalOrder,
     writePendingPayPalOrder,
+    activateFreeTrialCheckout,
 } from '@/lib/premium';
 import { ArrowLeft, Crown, Check, Zap, Shield, Clock, Cloud, Smartphone, ChevronDown, Loader2, CreditCard, ExternalLink } from 'lucide-react';
 
@@ -42,7 +44,7 @@ interface Plan {
     shortLabel: string;
 }
 
-const plans: Plan[] = PREMIUM_PLANS.map((plan) => ({
+const toCheckoutPlans = (premiumPlans = mergeAdminPackagesWithPremiumPlans([])): Plan[] => premiumPlans.map((plan) => ({
     id: plan.id,
     name: plan.name,
     price: plan.price,
@@ -54,6 +56,8 @@ const plans: Plan[] = PREMIUM_PLANS.map((plan) => ({
     shortLabel: plan.shortLabel,
 }));
 
+const fallbackPlans = toCheckoutPlans();
+
 export default function PremiumPage() {
     const searchParams = useSearchParams();
     const router = useRouter();
@@ -62,7 +66,8 @@ export default function PremiumPage() {
 
     const [devices, setDevices] = useState<Child[]>([]);
     const [selectedDevice, setSelectedDevice] = useState<Child | null>(null);
-    const [selectedPlan, setSelectedPlan] = useState<Plan | null>(plans.find((plan) => plan.id === 'yearly') || plans[0] || null);
+    const [plans, setPlans] = useState<Plan[]>(fallbackPlans);
+    const [selectedPlan, setSelectedPlan] = useState<Plan | null>(fallbackPlans.find((plan) => plan.id === 'yearly') || fallbackPlans[0] || null);
     const [couponCode, setCouponCode] = useState('');
     const [couponResult, setCouponResult] = useState<CouponValidationResult | null>(null);
     const [loading, setLoading] = useState(true);
@@ -76,11 +81,23 @@ export default function PremiumPage() {
     const finalAmount = couponResult?.valid ? couponResult.finalAmount : baseAmount;
 
     useEffect(() => {
-        const fetchDevices = async () => {
+        const fetchPageData = async () => {
             if (!user?.$id) return;
 
             try {
-                const data = await getAllChild(user.$id);
+                const [data, runtimePlans] = await Promise.all([
+                    getAllChild(user.$id),
+                    getRuntimePremiumPlans(),
+                ]);
+                const nextPlans = toCheckoutPlans(runtimePlans);
+                setPlans(nextPlans);
+                setSelectedPlan((current) => {
+                    if (current) {
+                        return nextPlans.find((plan) => plan.id === current.id) || nextPlans.find((plan) => plan.id === 'yearly') || nextPlans[0] || null;
+                    }
+                    return nextPlans.find((plan) => plan.id === 'yearly') || nextPlans[0] || null;
+                });
+
                 const nonPremiumDevices = data.filter(d => !d.is_Premium);
                 setDevices(nonPremiumDevices);
 
@@ -97,7 +114,7 @@ export default function PremiumPage() {
             }
         };
 
-        fetchDevices();
+        fetchPageData();
     }, [user?.$id, deviceIdFromUrl]);
 
     const handleApplyCoupon = async () => {
@@ -179,15 +196,38 @@ export default function PremiumPage() {
         return () => window.removeEventListener('message', handleMessage);
     }, [paymentWindow, showError, showWarning]);
 
-    const handleCheckoutPress = () => {
+    const handleCheckoutPress = async () => {
         if (!selectedDevice || !selectedPlan) {
             showWarning('Incomplete Selection', 'Please select a device and plan first.');
             return;
         }
 
-        if (selectedPlan.price === 0) {
+        const isTrialPlan = selectedPlan.price === 0 && (selectedPlan as any).trial_duration > 0;
+
+        if (selectedPlan.price === 0 && !isTrialPlan) {
             showInfo(PREMIUM_COPY.stayOnFreeTitle, PREMIUM_COPY.stayOnFreeMessage);
             router.back();
+            return;
+        }
+
+        if (isTrialPlan) {
+            setProcessing(true);
+            try {
+                await activateFreeTrialCheckout(
+                    user!.$id,
+                    selectedDevice.$id,
+                    selectedDevice.victim_id,
+                    selectedDevice.victime_name,
+                    selectedPlan as any
+                );
+                showSuccess('Trial Activated', `Your ${selectedPlan.name} is now active for ${selectedDevice.victime_name}.`);
+                router.push('/home');
+            } catch (err) {
+                console.error(err);
+                showError('Activation Failed', 'Unable to activate free trial. Please try again.');
+            } finally {
+                setProcessing(false);
+            }
             return;
         }
 
@@ -457,37 +497,47 @@ export default function PremiumPage() {
                             </button>
                         </div>
                         <div className="mt-3 text-sm">
-                            <p className="text-gray-300">{PREMIUM_COPY.basePrice}: {formatCurrency(baseAmount)}</p>
+            <p className="text-gray-300">{PREMIUM_COPY.basePrice}: {formatCurrency(baseAmount)}</p>
                             {couponResult?.valid && <p className="text-emerald-400">{PREMIUM_COPY.discount}: -{formatCurrency(couponResult.discountAmount)}</p>}
                             <p className="text-orange-300 font-semibold">{PREMIUM_COPY.totalToday}: {formatCurrency(finalAmount)}</p>
                         </div>
                     </div>
 
-                    <button
-                        onClick={handleCheckoutPress}
-                        disabled={!selectedDevice || !selectedPlan || processing}
-                        className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 mb-6 transition-all ${selectedDevice && selectedPlan && !processing
-                            ? 'bg-[#0070ba] hover:bg-[#003087] text-white'
-                            : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                            }`}
-                    >
-                        {processing ? (
-                            <>
-                                <Loader2 className="w-6 h-6 animate-spin" />
-                                Processing...
-                            </>
-                        ) : (
-                            <>
-                                <CreditCard className="w-6 h-6" />
-                                {selectedPlan
-                                    ? selectedPlan.price > 0
-                                        ? `${PREMIUM_COPY.continueCheckout} | ${formatCurrency(finalAmount)}`
-                                        : PREMIUM_COPY.stayFree
-                                    : 'Select a Plan'}
-                                <ExternalLink className="w-4 h-4 ml-1" />
-                            </>
-                        )}
-                    </button>
+                    {(() => {
+                        const isTrialPlan = selectedPlan?.price === 0 && (selectedPlan as any).trial_duration > 0;
+                        const buttonColorClass = selectedDevice && selectedPlan && !processing
+                            ? isTrialPlan 
+                                ? 'bg-gradient-to-r from-orange-500 to-yellow-500 hover:opacity-90 text-white'
+                                : 'bg-[#0070ba] hover:bg-[#003087] text-white'
+                            : 'bg-gray-700 text-gray-400 cursor-not-allowed';
+                        
+                        return (
+                            <button
+                                onClick={handleCheckoutPress}
+                                disabled={!selectedDevice || !selectedPlan || processing}
+                                className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 mb-6 transition-all ${buttonColorClass}`}
+                            >
+                                {processing ? (
+                                    <>
+                                        <Loader2 className="w-6 h-6 animate-spin" />
+                                        Processing...
+                                    </>
+                                ) : (
+                                    <>
+                                        <CreditCard className="w-6 h-6" />
+                                        {selectedPlan
+                                            ? isTrialPlan
+                                                ? `Activate Free Trial | $0.00`
+                                                : selectedPlan.price > 0
+                                                    ? `${PREMIUM_COPY.continueCheckout} | ${formatCurrency(finalAmount)}`
+                                                    : PREMIUM_COPY.stayFree
+                                            : 'Select a Plan'}
+                                        {!isTrialPlan && <ExternalLink className="w-4 h-4 ml-1" />}
+                                    </>
+                                )}
+                            </button>
+                        );
+                    })()}
 
                     <div className="ms-card p-6">
                         <h3 className="text-lg font-bold text-white mb-4">Premium Features</h3>
@@ -513,9 +563,3 @@ export default function PremiumPage() {
         </div>
     );
 }
-
-
-
-
-
-
