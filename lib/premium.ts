@@ -338,7 +338,51 @@ export async function finalizePremiumCheckout(order: StoredPayPalOrder) {
     await incrementCouponRedemption(order.couponId, (order.couponRedemptionCount || 0) + 1);
   }
 
-  await updateChild(order.deviceDocumentId, true, order.planId, null);
+  // Find the package detail from the database or offline fallback to calculate ending date
+  const packages = await getActivePackages().catch(() => []);
+  const pkg = packages.find(p => p.slug === order.planId || p.$id === order.planId);
+
+  let endingDate: string | null = null;
+  if (pkg) {
+    const type = pkg.plan_type || 'monthly';
+    const now = new Date();
+    if (type === 'monthly') {
+      now.setMonth(now.getMonth() + 1);
+      endingDate = now.toISOString();
+    } else if (type === 'yearly') {
+      now.setFullYear(now.getFullYear() + 1);
+      endingDate = now.toISOString();
+    } else if (type === 'lifetime' || type === 'one-time') {
+      endingDate = null;
+    } else if (type === 'custom') {
+      const dur = pkg.validity_duration || 1;
+      const unit = pkg.validity_unit || 'months';
+      if (unit === 'days') {
+        now.setDate(now.getDate() + dur);
+      } else if (unit === 'weeks') {
+        now.setDate(now.getDate() + dur * 7);
+      } else if (unit === 'months') {
+        now.setMonth(now.getMonth() + dur);
+      } else if (unit === 'years') {
+        now.setFullYear(now.getFullYear() + dur);
+      }
+      endingDate = now.toISOString();
+    }
+  } else {
+    // Fallback if package is not found
+    const now = new Date();
+    if (order.planId === 'yearly') {
+      now.setFullYear(now.getFullYear() + 1);
+      endingDate = now.toISOString();
+    } else if (order.planId === 'monthly') {
+      now.setMonth(now.getMonth() + 1);
+      endingDate = now.toISOString();
+    } else if (order.planId === 'premium') {
+      endingDate = null;
+    }
+  }
+
+  await updateChild(order.deviceDocumentId, true, pkg?.$id || order.planId, endingDate);
 }
 
 export async function activateFreeTrialCheckout(

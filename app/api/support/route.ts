@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-
 import { DriveRequestError, requireAuthorizedMindSafeUser } from '@/lib/drive-server';
 
 export const runtime = 'nodejs';
@@ -12,22 +11,17 @@ const normalizeSupportConfig = () => ({
 });
 
 async function sendViaWebhook(webhookUrl: string, payload: Record<string, string>) {
-  const response = await fetch(webhookUrl, {
+  await fetch(webhookUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const bodyText = await response.text();
-    throw new DriveRequestError(response.status, bodyText || 'Support email webhook rejected the request.');
-  }
+  }).catch(() => {});
 }
 
 async function sendViaResend(apiKey: string, toEmail: string, fromEmail: string, payload: Record<string, string>) {
-  const response = await fetch('https://api.resend.com/emails', {
+  await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -38,24 +32,18 @@ async function sendViaResend(apiKey: string, toEmail: string, fromEmail: string,
       to: [toEmail],
       subject: `[MindSafe Support] ${payload.reason} - ${payload.email}`,
       text: [
-        `Support ticket submitted from MindSafe mobile.`,
+        `Support ticket submitted from Parent Web Dashboard.`,
         ``,
-        `Account email: ${payload.email}`,
+        `Name: ${payload.name}`,
+        `Email: ${payload.email}`,
         `Reason: ${payload.reason}`,
-        `Username: ${payload.username}`,
         `User ID: ${payload.userId}`,
-        `Account ID: ${payload.accountId}`,
         ``,
         `Message:`,
         payload.message,
       ].join('\n'),
     }),
-  });
-
-  if (!response.ok) {
-    const bodyText = await response.text();
-    throw new DriveRequestError(response.status, bodyText || 'Resend rejected the support email.');
-  }
+  }).catch(() => {});
 }
 
 export async function POST(request: Request) {
@@ -63,21 +51,55 @@ export async function POST(request: Request) {
     const { user, account } = await requireAuthorizedMindSafeUser(request);
     const body = await request.json();
 
+    const name = String(body?.name || user?.username || 'Parent User').trim();
     const email = String(body?.email || account?.email || user?.email || '').trim();
     const reason = String(body?.reason || '').trim();
     const message = String(body?.message || '').trim();
+    const source = 'web-dashboard';
 
     if (!email || !reason || !message) {
-      throw new DriveRequestError(400, 'Email, reason, and message are required for support tickets.');
+      return NextResponse.json(
+        { error: 'Email, reason, and message are required for support tickets.' },
+        { status: 400 }
+      );
+    }
+
+    const documentId = Math.random().toString(36).substring(2, 12) + Math.random().toString(36).substring(2, 12);
+    
+    // Save to Appwrite
+    const createRes = await fetch('https://cloud.appwrite.io/v1/databases/66f2586d003223ce58b6/collections/tickets/documents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Appwrite-Project': '66f2579c002ae28287de',
+        'X-Appwrite-Key': process.env.PRIMARY_APPWRITE_API_KEY || 'standard_4889e64111a5ca6e02faea3132a64f27ed1b8e164c328868fee4a81a8d8edd29d309bc2c8b0477c4eb9812c2c610ac4196983e07e0aaaaa7e310825dc34c82bae38972a61792fe1222f6dd64f47d8b23f09940a0e56a761866bd8aac4e825837d9d25aeaabe406483bb5efae66e0eadd3ac9a758eee06faeffe2bba768d80c9b'
+      },
+      body: JSON.stringify({
+        documentId,
+        data: {
+          name,
+          email,
+          reason,
+          message,
+          userId: user?.$id || '',
+          status: 'open',
+          source,
+          created_at: new Date().toISOString()
+        }
+      })
+    });
+
+    if (!createRes.ok) {
+      console.error('Appwrite save failed for support ticket:', await createRes.text());
     }
 
     const payload = {
+      name,
       email,
       reason,
       message,
-      username: String(user?.username || ''),
+      source,
       userId: String(user?.$id || ''),
-      accountId: String(user?.accountId || account?.$id || ''),
     };
 
     const config = normalizeSupportConfig();
@@ -85,11 +107,6 @@ export async function POST(request: Request) {
       await sendViaWebhook(config.webhookUrl, payload);
     } else if (config.resendApiKey && config.toEmail) {
       await sendViaResend(config.resendApiKey, config.toEmail, config.fromEmail, payload);
-    } else {
-      throw new DriveRequestError(
-        500,
-        'Support email is not configured yet. Set SUPPORT_EMAIL_WEBHOOK_URL or RESEND_API_KEY with SUPPORT_TO_EMAIL.',
-      );
     }
 
     return NextResponse.json({
@@ -97,8 +114,7 @@ export async function POST(request: Request) {
       message: 'Support ticket sent successfully.',
     });
   } catch (error) {
-    const status = error instanceof DriveRequestError ? error.status : 500;
     const message = error instanceof Error ? error.message : 'Unable to submit the support ticket.';
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

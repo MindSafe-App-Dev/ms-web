@@ -118,7 +118,24 @@ export default function ProfilePage() {
 
         setIsSubmitting(true);
         try {
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            const res = await fetch('/api/support', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    email: user?.email || '',
+                    reason: selectedReason,
+                    message: supportMessage,
+                    name: user?.username || 'Parent User',
+                }),
+            });
+
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || 'Failed to submit support request.');
+            }
+
             showSuccess('Support Request Submitted', "We'll get back to you soon.");
             setSupportMessage('');
             setSelectedReason('');
