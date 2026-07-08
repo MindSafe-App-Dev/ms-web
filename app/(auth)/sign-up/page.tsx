@@ -1,15 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, Mail, Lock, User } from 'lucide-react';
 import { createUser } from '@/lib/appwrite';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { useNotification } from '@/context/NotificationProvider';
 
-export default function SignUpPage() {
+function SignUpForm() {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const { setUser, setIsLogged } = useGlobalContext();
     const { showSuccess, showError, showWarning } = useNotification();
 
@@ -18,6 +19,14 @@ export default function SignUpPage() {
     const [isSubmitting, setSubmitting] = useState(false);
     const [showTermsModal, setShowTermsModal] = useState(false);
     const [isAgreed, setIsAgreed] = useState(false);
+
+    useEffect(() => {
+        const ref = searchParams.get('ref') || searchParams.get('referral');
+        if (ref) {
+            localStorage.setItem('ms_referral_code', ref);
+            console.log('Saved referral code:', ref);
+        }
+    }, [searchParams]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -199,5 +208,17 @@ export default function SignUpPage() {
             <div className="fixed top-20 right-20 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
             <div className="fixed bottom-20 left-20 w-64 h-64 bg-pink-500/10 rounded-full blur-3xl pointer-events-none" />
         </div>
+    );
+}
+
+export default function SignUpPage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen flex items-center justify-center bg-gray-900">
+                <div className="text-white text-lg">Loading...</div>
+            </div>
+        }>
+            <SignUpForm />
+        </Suspense>
     );
 }

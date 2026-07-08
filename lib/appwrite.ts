@@ -86,6 +86,9 @@ export interface AdminPackage {
   trial_duration?: number;
   trial_duration_unit?: string;
   trial_fallback_slug?: string;
+  plan_type?: string;
+  validity_duration?: number;
+  validity_unit?: string;
 }
 
 export interface AdminSetting {

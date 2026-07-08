@@ -334,6 +334,54 @@ export async function finalizePremiumCheckout(order: StoredPayPalOrder) {
     throw new Error(PREMIUM_COPY.paymentFailedMessage);
   }
 
+  if (typeof window !== 'undefined') {
+    const referralCode = localStorage.getItem('ms_referral_code');
+    if (referralCode) {
+      try {
+        console.log(`Finalizing checkout: found referral code ${referralCode}. Attempting redemption...`);
+        const endpoints = [
+          'http://localhost:5000/api/sdk/referral/redeem',
+          'https://ingain-server-production-c8ea.up.railway.app/api/sdk/referral/redeem'
+        ];
+        let redeemed = false;
+        for (const url of endpoints) {
+          try {
+            const response = await fetch(url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': 'COMP-ms'
+              },
+              body: JSON.stringify({
+                referral_code: referralCode.toUpperCase(),
+                redeemer_info: {
+                  email: order.userId,
+                  name: order.deviceName
+                }
+              })
+            });
+            if (response.ok) {
+              const resData = await response.json();
+              console.log(`Referral redeemed successfully via ${url}:`, resData);
+              redeemed = true;
+              break;
+            } else {
+              const errText = await response.text();
+              console.warn(`Referral redemption failed via ${url}:`, errText);
+            }
+          } catch (fetchErr) {
+            console.error(`Fetch error for referral redemption via ${url}:`, fetchErr);
+          }
+        }
+        if (redeemed) {
+          localStorage.removeItem('ms_referral_code');
+        }
+      } catch (err) {
+        console.error('Error during referral redemption processing:', err);
+      }
+    }
+  }
+
   if (order.couponId) {
     await incrementCouponRedemption(order.couponId, (order.couponRedemptionCount || 0) + 1);
   }

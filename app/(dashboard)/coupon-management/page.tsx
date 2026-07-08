@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useNotification } from '@/context/NotificationProvider';
 import { useGlobalContext } from '@/context/GlobalProvider';
-import { createCoupon, deleteCoupon, getCoupons, updateCoupon, Coupon } from '@/lib/appwrite';
-import { BadgePercent, Loader2, Trash2, Save } from 'lucide-react';
+import { createCoupon, getCoupons, updateCoupon, Coupon } from '@/lib/appwrite';
+import { BadgePercent, Loader2, Save } from 'lucide-react';
 
 export default function CouponManagementPage() {
     const { showSuccess, showError, showInfo } = useNotification();
@@ -74,16 +74,6 @@ export default function CouponManagementPage() {
         }
     };
 
-    const handleDelete = async (coupon: Coupon) => {
-        try {
-            await deleteCoupon(coupon.$id);
-            showSuccess('Coupon Deleted', `${coupon.code} was removed.`);
-            await refreshCoupons();
-        } catch {
-            showError('Delete Failed', 'Could not delete coupon.');
-        }
-    };
-
     if (!isCouponAdmin) {
         return (
             <div className="max-w-3xl mx-auto ms-card p-8 text-center">
@@ -141,9 +131,6 @@ export default function CouponManagementPage() {
                                 <div className="flex items-center gap-2">
                                     <button onClick={() => toggleActive(coupon)} className={`px-3 py-1 rounded-lg text-sm font-semibold ${coupon.is_active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-gray-500/20 text-gray-300'}`}>
                                         {coupon.is_active ? 'Active' : 'Inactive'}
-                                    </button>
-                                    <button onClick={() => handleDelete(coupon)} className="p-2 rounded-lg bg-rose-500/20 text-rose-300">
-                                        <Trash2 className="w-4 h-4" />
                                     </button>
                                 </div>
                             </div>
