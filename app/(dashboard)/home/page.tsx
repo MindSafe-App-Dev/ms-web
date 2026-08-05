@@ -263,7 +263,8 @@ export default function HomePage() {
                                         onClick={(e) => {
                                             e.preventDefault();
                                             e.stopPropagation();
-                                            window.open('/download-apk', '_blank');
+                                            const websiteUrl = process.env.NEXT_PUBLIC_WEBSITE_URL || 'http://localhost:5173';
+                                            window.open(`${websiteUrl}/download-apk`, '_blank');
                                         }}
                                         className="p-2.5 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 hover:text-white border border-orange-500/20 transition-all flex items-center justify-center gap-1.5 shrink-0 text-xs font-semibold mr-1"
                                         title="Get APK"
