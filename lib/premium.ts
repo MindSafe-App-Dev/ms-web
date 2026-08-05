@@ -326,8 +326,6 @@ export async function finalizePremiumCheckout(order: StoredPayPalOrder) {
     date: new Date().toISOString(),
     amount: order.amount,
     status: true,
-    package_id: order.planId,
-    package_name: order.planName,
   });
 
   if (!paymentCreated) {
@@ -461,8 +459,6 @@ export async function activateFreeTrialCheckout(
     date: new Date().toISOString(),
     amount: 0,
     status: true,
-    package_id: plan.id,
-    package_name: plan.name,
   });
 
   if (!paymentCreated) {

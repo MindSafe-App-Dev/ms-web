@@ -12,6 +12,7 @@ export const appwriteConfig = {
   trialCollectionId: process.env.NEXT_PUBLIC_APPWRITE_TRIAL_COLLECTION_ID || 'trial_collection_id',
   packageCollectionId: process.env.NEXT_PUBLIC_APPWRITE_PACKAGE_COLLECTION_ID || 'package_collection_id',
   adminSettingsCollectionId: process.env.NEXT_PUBLIC_APPWRITE_ADMIN_SETTINGS_COLLECTION_ID || 'admin_settings_collection_id',
+  apkCollectionId: process.env.NEXT_PUBLIC_APPWRITE_APK_COLLECTION_ID || 'apk_versions',
 };
 
 const client = new Client()
@@ -714,3 +715,32 @@ export async function consumeTrialAccess(clientId: string, deviceId: string, fea
     };
   }
 }
+
+export interface ApkVersion {
+  $id: string;
+  $createdAt?: string;
+  version: string;
+  fileId: string;
+  isActive: boolean;
+  notes?: string;
+}
+
+export async function getActiveApkVersion(): Promise<ApkVersion | null> {
+  try {
+    const result = await databases.listDocuments(
+      appwriteConfig.databaseId,
+      appwriteConfig.apkCollectionId,
+      [Query.equal('isActive', true), Query.limit(1)]
+    );
+    if (result.documents.length === 0) return null;
+    return result.documents[0] as unknown as ApkVersion;
+  } catch (error) {
+    console.error('Error fetching active APK version:', error);
+    return null;
+  }
+}
+
+export function getFileDownloadUrl(fileId: string): string {
+  return storage.getFileDownload(appwriteConfig.storageId, fileId).toString();
+}
+
