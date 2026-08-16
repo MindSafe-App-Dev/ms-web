@@ -16,7 +16,7 @@ export default function DownloadApkPage() {
                 const ver = await getActiveApkVersion();
                 if (ver) {
                     setActiveVersion(ver);
-                    const url = getFileDownloadUrl(ver.fileId);
+                    const url = `/api/download-apk?fileId=${ver.fileId}&version=${ver.version}`;
                     setDownloadUrl(url);
                 }
             } catch (err) {
