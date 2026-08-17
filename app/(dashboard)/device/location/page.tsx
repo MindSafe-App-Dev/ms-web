@@ -13,13 +13,14 @@ export default function LocationPage() {
 
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
+    const serverUrl = searchParams.get('serverUrl') || undefined;
 
     const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
     useEffect(() => {
-        initSocket(deviceId);
+        initSocket(deviceId, serverUrl);
         showConnection(true, 'Connected to location server');
 
         onResult((data: SocketResult) => {
@@ -44,7 +45,8 @@ export default function LocationPage() {
         });
 
         return () => disconnectSocket();
-    }, [deviceId]);
+    }, [deviceId, serverUrl]);
+
 
     const handleRefresh = () => {
         setIsLoading(true);

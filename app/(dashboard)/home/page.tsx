@@ -222,7 +222,7 @@ export default function HomePage() {
                         return (
                             <Link
                                 key={device.$id}
-                                href={`/device/${device.$id}?name=${encodeURIComponent(device.victime_name)}&deviceId=${device.victim_id}&isPremium=${device.is_Premium === true ? 'true' : 'false'}`}
+                                href={`/device/${device.$id}?name=${encodeURIComponent(device.victime_name)}&deviceId=${device.victim_id}&isPremium=${device.is_Premium === true ? 'true' : 'false'}${device.server_url ? `&serverUrl=${encodeURIComponent(device.server_url)}` : ''}`}
                                 className="block ms-card ms-card-hover p-4"
                             >
                                 <div className="flex items-center gap-4">

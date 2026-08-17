@@ -12,6 +12,9 @@ import { Folder, ArrowLeft, RefreshCw, ChevronRight, Download, FolderOpen, Image
 
 interface FileItem {
     id: string;
+
+interface FileItem {
+    id: string;
     name: string;
     isDir: boolean;
     path: string;
@@ -31,12 +34,14 @@ const quickAccessPaths = [
 export default function FilesPage() {
     const searchParams = useSearchParams();
     const router = useRouter();
+
     const { showSuccess, showError, showInfo, showTimeout, showConnection, showWarning, showPremium } = useNotification();
     const { user } = useGlobalContext();
 
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
     const isPremium = searchParams.get('isPremium') === 'true';
+    const serverUrl = searchParams.get('serverUrl') || undefined;
 
     const [currentPath, setCurrentPath] = useState('/sdcard');
     const [files, setFiles] = useState<FileItem[]>([]);
@@ -64,7 +69,7 @@ export default function FilesPage() {
         return true;
     };
     useEffect(() => {
-        initSocket(deviceId);
+        initSocket(deviceId, serverUrl);
         showConnection(true, 'Connected to device');
 
         onResult((data: SocketResult) => {
@@ -110,13 +115,10 @@ export default function FilesPage() {
         });
 
         return () => disconnectSocket();
-    }, [deviceId]);
+    }, [deviceId, serverUrl]);
 
     async function browseDirectory(path: string) {
         const canUse = await ensureTrialOnFirstUse();
-        if (!canUse) return;
-        setFiles([]);
-        setIsLoading(true);
         setCurrentPath(path);
 
         sendCommand({

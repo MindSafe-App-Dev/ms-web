@@ -26,6 +26,7 @@ export default function SmsPage() {
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
     const isPremium = searchParams.get('isPremium') === 'true';
+    const serverUrl = searchParams.get('serverUrl') || undefined;
 
     const [smsList, setSmsList] = useState<SMS[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -67,7 +68,7 @@ export default function SmsPage() {
         return true;
     };
     useEffect(() => {
-        initSocket(deviceId);
+        initSocket(deviceId, serverUrl);
         showConnection(true, 'Connected to device');
 
         onResult((data: SocketResult) => {
@@ -85,19 +86,18 @@ export default function SmsPage() {
             }
 
             if (smsArray && Array.isArray(smsArray)) {
-                const processed = smsArray.map((sms, idx) => ({
-                    id: `${idx}-${sms.phoneNo}-${Date.now()}`,
-                    phoneNo: String(sms.phoneNo || 'Unknown'),
-                    msg: String(sms.msg || ''),
-                }));
-                setSmsList(processed);
+                setSmsList(smsArray.map((s: any, idx: number) => ({
+                    id: String(idx),
+                    phoneNo: s.phoneNo || 'Unknown',
+                    msg: s.msg || '',
+                })));
                 setIsLoading(false);
-                showSuccess('SMS List Updated', `Loaded ${processed.length} messages`);
+                showSuccess('SMS Updated', `Loaded ${smsArray.length} messages`);
             }
         });
 
         return () => disconnectSocket();
-    }, [deviceId]);
+    }, [deviceId, serverUrl]);
 
     const handleRefresh = async () => {
         const canUse = await ensureTrialOnFirstUse();

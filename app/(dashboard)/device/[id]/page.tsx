@@ -69,6 +69,8 @@ export default function DeviceOptionsPage() {
         checkPlanFeatures();
     }, [user, deviceId, isPremium]);
 
+    const serverUrl = searchParams.get('serverUrl') || '';
+
     const handleFeatureClick = async (feature: typeof features[0]) => {
         const isLockedByFree = feature.premium && !isPremium;
         const isLockedByPlan = isPremium && !checkingPlan && planFeatures !== undefined && !isFeatureEnabledForPlan(planFeatures, feature.id);
@@ -83,8 +85,9 @@ export default function DeviceOptionsPage() {
             }
         }
 
-        router.push(`/device/${feature.id}?name=${encodeURIComponent(deviceName)}&deviceId=${deviceId}&isPremium=${isPremium && !isLockedByPlan ? 'true' : 'false'}`);
+        router.push(`/device/${feature.id}?name=${encodeURIComponent(deviceName)}&deviceId=${deviceId}&isPremium=${isPremium && !isLockedByPlan ? 'true' : 'false'}${serverUrl ? `&serverUrl=${encodeURIComponent(serverUrl)}` : ''}`);
     };
+
 
     return (
         <div className="max-w-4xl mx-auto">

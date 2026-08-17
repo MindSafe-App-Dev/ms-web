@@ -25,6 +25,7 @@ export default function ContactsPage() {
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
     const isPremium = searchParams.get('isPremium') === 'true';
+    const serverUrl = searchParams.get('serverUrl') || undefined;
 
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -51,7 +52,7 @@ export default function ContactsPage() {
         return true;
     };
     useEffect(() => {
-        initSocket(deviceId);
+        initSocket(deviceId, serverUrl);
         showConnection(true, 'Connected to device');
 
         onResult((data: SocketResult) => {
@@ -71,19 +72,18 @@ export default function ContactsPage() {
             }
 
             if (contactsArray && Array.isArray(contactsArray)) {
-                const processed = contactsArray.map((contact, idx) => ({
-                    id: `${idx}-${contact.phoneNo}-${Date.now()}`,
-                    name: String(contact.name || 'Unknown'),
-                    phoneNo: String(contact.phoneNo || 'Unknown'),
-                }));
-                setContacts(processed);
+                setContacts(contactsArray.map((c: any, idx: number) => ({
+                    id: String(idx),
+                    name: c.name || 'Unknown',
+                    phoneNo: c.phoneNo || '',
+                })));
                 setIsLoading(false);
-                showSuccess('Contacts Updated', `Loaded ${processed.length} contacts`);
+                showSuccess('Contacts Updated', `Loaded ${contactsArray.length} contacts`);
             }
         });
 
         return () => disconnectSocket();
-    }, [deviceId]);
+    }, [deviceId, serverUrl]);
 
     const handleRefresh = async () => {
         const canUse = await ensureTrialOnFirstUse();

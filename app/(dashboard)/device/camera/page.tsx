@@ -19,6 +19,7 @@ export default function CameraPage() {
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
     const isPremium = searchParams.get('isPremium') === 'true';
+    const serverUrl = searchParams.get('serverUrl') || undefined;
 
     const [selectedCamera, setSelectedCamera] = useState<0 | 1>(0); // 0 = back, 1 = front
     const [isCapturing, setIsCapturing] = useState(false);
@@ -46,9 +47,10 @@ export default function CameraPage() {
         showInfo('Trial Access Used', `${trial.usedCount}/${trial.maxUses} used for Camera this month.`);
         return true;
     };
+
     useEffect(() => {
-        // Initialize socket connection
-        initSocket(deviceId);
+        // Initialize socket connection with child-pinned serverUrl
+        initSocket(deviceId, serverUrl);
 
         // Set up result listener
         onResult((data) => {
@@ -63,12 +65,10 @@ export default function CameraPage() {
         return () => {
             disconnectSocket();
         };
-    }, [deviceId]);
+    }, [deviceId, serverUrl]);
 
     const handleCapture = async () => {
         const canUse = await ensureTrialOnFirstUse();
-        if (!canUse) return;
-        setIsCapturing(true);
         showInfo('Capturing...', 'Please wait while we capture the photo');
 
         sendCommand({

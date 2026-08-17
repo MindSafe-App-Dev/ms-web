@@ -35,6 +35,7 @@ export default function MicrophonePage() {
     const deviceName = searchParams.get('name') || 'Device';
     const deviceId = searchParams.get('deviceId') || '';
     const isPremium = searchParams.get('isPremium') === 'true';
+    const serverUrl = searchParams.get('serverUrl') || undefined;
 
     const [selectedTime, setSelectedTime] = useState(20);
     const [isRecording, setIsRecording] = useState(false);
@@ -64,17 +65,11 @@ export default function MicrophonePage() {
         const link = document.createElement('a');
         link.href = blobUrl;
         link.download = fileName;
-        link.rel = 'noopener';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-
-        const opened = typeof window !== 'undefined'
-            && /iPad|iPhone|iPod|Android/i.test(window.navigator.userAgent)
-            && window.open(blobUrl, '_blank', 'noopener,noreferrer');
-
-        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-        return Boolean(opened) || 'download' in HTMLAnchorElement.prototype;
+        URL.revokeObjectURL(blobUrl);
+        return true;
     };
 
     const ensureTrialOnFirstUse = async () => {
@@ -96,9 +91,10 @@ export default function MicrophonePage() {
         showInfo('Trial Access Used', `${trial.usedCount}/${trial.maxUses} used for Microphone this month.`);
         return true;
     };
+
     useEffect(() => {
         // Initialize socket connection
-        initSocket(deviceId);
+        initSocket(deviceId, serverUrl);
         showConnection(true, 'Connected to device');
 
         // Set up result listener
@@ -106,7 +102,6 @@ export default function MicrophonePage() {
             console.log('Microphone result received:', data);
 
             // Audio data received from server
-            // The buffer can be either a data URL or raw base64
             if (data.buffer) {
                 console.log('Audio buffer received, length:', data.buffer.length);
 
@@ -130,8 +125,6 @@ export default function MicrophonePage() {
                 // Handle the buffer - it might be raw base64 or already a data URL
                 let audioDataUrl = data.buffer;
                 if (!data.buffer.startsWith('data:')) {
-                    // It's raw base64, convert to data URL
-                    // Remove any data:audio/xxx;base64, prefix if present in raw form
                     const cleanBase64 = data.buffer.replace(/^data:(audio|video)\/\w+;base64,/, '');
                     audioDataUrl = `data:audio/mp4;base64,${cleanBase64}`;
                 }
@@ -140,7 +133,6 @@ export default function MicrophonePage() {
                 setIsSaved(false);
                 showSuccess('Recording Complete', 'Audio captured successfully!');
             } else if (data.audio) {
-                // Some servers might just signal audio is ready
                 console.log('Audio signal received:', data);
             }
         });
@@ -151,12 +143,11 @@ export default function MicrophonePage() {
             }
             disconnectSocket();
         };
-    }, [deviceId, deviceName]);
+    }, [deviceId, deviceName, serverUrl]);
+
 
     const handleStartRecording = async () => {
         const canUse = await ensureTrialOnFirstUse();
-        if (!canUse) return;
-        setIsRecording(true);
         setRecordedAudio(null);
         setIsSaved(false);
         setRemainingTime(selectedTime);

