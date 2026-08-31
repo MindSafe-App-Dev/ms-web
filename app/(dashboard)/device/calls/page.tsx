@@ -196,6 +196,37 @@ export default function CallsPage() {
             `CallLogs_${new Date().toISOString().split('T')[0]}.csv`
         );
         showSuccess('Exported', 'Call logs saved as CSV');
+    };
+
+    const filteredCalls = useMemo(() => {
+        let result = calls;
+
+        if (selectedFilter !== 'all') {
+            const typeMap: Record<string, number> = { incoming: 1, outgoing: 2, missed: 3 };
+            result = result.filter(c => c.type === typeMap[selectedFilter]);
+        }
+
+        if (searchQuery) {
+            const q = searchQuery.toLowerCase();
+            result = result.filter(c =>
+                c.name.toLowerCase().includes(q) || c.phoneNo.includes(q)
+            );
+        }
+
+        return result;
+    }, [calls, selectedFilter, searchQuery]);
+
+    const stats = useMemo(() => ({
+        all: calls.length,
+        incoming: calls.filter(c => c.type === 1).length,
+        outgoing: calls.filter(c => c.type === 2).length,
+        missed: calls.filter(c => c.type === 3).length,
+    }), [calls]);
+
+    const filters = [
+        { id: 'all', label: 'All', icon: Phone, count: stats.all, colors: ['#8b5cf6', '#7c3aed'] },
+        { id: 'incoming', label: 'Incoming', icon: PhoneIncoming, count: stats.incoming, colors: ['#10b981', '#059669'] },
+        { id: 'outgoing', label: 'Outgoing', icon: PhoneOutgoing, count: stats.outgoing, colors: ['#3b82f6', '#2563eb'] },
         { id: 'missed', label: 'Missed', icon: PhoneMissed, count: stats.missed, colors: ['#ef4444', '#dc2626'] },
     ] as const;
 
