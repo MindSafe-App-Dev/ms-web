@@ -12,9 +12,6 @@ import { Folder, ArrowLeft, RefreshCw, ChevronRight, Download, FolderOpen, Image
 
 interface FileItem {
     id: string;
-
-interface FileItem {
-    id: string;
     name: string;
     isDir: boolean;
     path: string;
