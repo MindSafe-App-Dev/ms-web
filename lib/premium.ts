@@ -531,6 +531,7 @@ export function isFeatureEnabledForPlan(planFeatures: string[] | undefined, feat
   }
   
   if (featureSlug === 'location' && features.some(f => f.includes('location'))) return true;
+  if (featureSlug === 'app-usage' || featureSlug === 'app usage') return true;
   if (featureSlug === 'camera' && features.some(f => f.includes('camera'))) return true;
   if (featureSlug === 'microphone' && features.some(f => f.includes('mic') || f.includes('micro'))) return true;
   if (featureSlug === 'calls' && features.some(f => f.includes('call') || f.includes('phone'))) return true;

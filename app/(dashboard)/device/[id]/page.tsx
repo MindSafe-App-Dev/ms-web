@@ -8,7 +8,7 @@ import { buildPremiumRoute, isFeatureEnabledForPlan } from '@/lib/premium';
 import { getAllPayments, getActivePackages } from '@/lib/appwrite';
 import Link from 'next/link';
 import {
-    Camera, Mic, Phone, Users, MessageSquare, MapPin, Folder,
+    Camera, Mic, Phone, Users, MessageSquare, MapPin, Folder, BarChart3,
     Smartphone, Crown, Lock, ArrowLeft, ChevronRight
 } from 'lucide-react';
 
@@ -20,6 +20,7 @@ const features = [
     { id: 'sms', title: 'SMS', description: 'Read messages', icon: MessageSquare, premium: true },
     { id: 'location', title: 'Location', description: 'Track device location', icon: MapPin, premium: false },
     { id: 'files', title: 'File Manager', description: 'Browse and download files', icon: Folder, premium: true },
+    { id: 'app-usage', title: 'App Usage', description: 'Monitor app activity & screen time', icon: BarChart3, premium: false },
 ];
 
 export default function DeviceOptionsPage() {

