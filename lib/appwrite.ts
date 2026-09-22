@@ -15,7 +15,7 @@ export const appwriteConfig = {
   apkCollectionId: process.env.NEXT_PUBLIC_APPWRITE_APK_COLLECTION_ID || 'apk_versions',
 };
 
-const client = new Client()
+export const client = new Client()
   .setEndpoint(appwriteConfig.endpoint)
   .setProject(appwriteConfig.projectId);
 

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
-import { getCurrentUser, updateUserIsInitial, User } from '@/lib/appwrite';
+import { getCurrentUser, updateUserIsInitial, User, client, appwriteConfig } from '@/lib/appwrite';
 import { getDevUxMode } from '@/lib/runtimeConfig';
 
 interface GlobalContextType {
@@ -56,13 +56,31 @@ export default function GlobalProvider({ children }: GlobalProviderProps) {
         }
     }, []);
 
-    // Live effect: initial check + interval polling + window focus & visibilitychange
+    // Live effect: realtime Appwrite subscription + initial check + interval polling + window focus & visibilitychange
     useEffect(() => {
         refreshDevUxMode({ forceRefresh: true });
 
+        // Realtime Appwrite listener for instant switch when Admin changes toggle
+        let unsubscribeRealtime: (() => void) | null = null;
+        try {
+            unsubscribeRealtime = client.subscribe(
+                `databases.${appwriteConfig.databaseId}.collections.${appwriteConfig.adminSettingsCollectionId}.documents`,
+                (response) => {
+                    const payload: any = response?.payload;
+                    const relevantKeys = ['dev_ux_mode', 'dev_ux_versions', 'primary_app_versions'];
+                    if (!payload?.key || relevantKeys.includes(payload.key)) {
+                        console.log('Admin Dev UX setting changed in realtime, updating web UI immediately...');
+                        refreshDevUxMode({ forceRefresh: true });
+                    }
+                }
+            );
+        } catch (subErr) {
+            console.warn('Realtime subscription to admin settings unavailable:', subErr);
+        }
+
         const interval = setInterval(() => {
             refreshDevUxMode({ forceRefresh: true });
-        }, 10000);
+        }, 5000);
 
         const handleFocus = () => {
             refreshDevUxMode({ forceRefresh: true });
@@ -78,6 +96,11 @@ export default function GlobalProvider({ children }: GlobalProviderProps) {
         document.addEventListener('visibilitychange', handleVisibilityChange);
 
         return () => {
+            if (unsubscribeRealtime) {
+                try {
+                    unsubscribeRealtime();
+                } catch {}
+            }
             clearInterval(interval);
             window.removeEventListener('focus', handleFocus);
             document.removeEventListener('visibilitychange', handleVisibilityChange);

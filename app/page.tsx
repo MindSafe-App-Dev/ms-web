@@ -7,7 +7,7 @@ import { useGlobalContext } from '@/context/GlobalProvider';
 import { Loader2 } from 'lucide-react';
 
 export default function WelcomePage() {
-  const { loading, isLogged } = useGlobalContext();
+  const { loading, isLogged, devUxMode } = useGlobalContext();
   const router = useRouter();
 
   useEffect(() => {
@@ -54,6 +54,12 @@ export default function WelcomePage() {
 
       {/* Title */}
       <div className="text-center mb-8">
+        {devUxMode && (
+          <div className="mb-3 inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-purple-950/80 border border-purple-500/30 text-purple-300 text-xs font-semibold shadow-inner">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            Parental Control & Family Protection Active
+          </div>
+        )}
         <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
           Be Mindful..
         </h1>

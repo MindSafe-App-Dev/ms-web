@@ -64,9 +64,9 @@ export async function getActiveServerUrl({ forceRefresh = false } = {}): Promise
 
 let cachedDevUxMode: boolean | null = null;
 let cachedDevUxAt = 0;
-const DEV_UX_CACHE_MS = 10 * 1000;
+const DEV_UX_CACHE_MS = 5 * 1000;
 
-export async function getDevUxMode({ forceRefresh = false } = {}): Promise<boolean> {
+export async function getDevUxMode({ forceRefresh = false, version = 'web' } = {}): Promise<boolean> {
   const now = Date.now();
 
   if (!forceRefresh && cachedDevUxMode !== null && now - cachedDevUxAt < DEV_UX_CACHE_MS) {
@@ -85,26 +85,7 @@ export async function getDevUxMode({ forceRefresh = false } = {}): Promise<boole
     const devUxVersionsDoc = docs.find((d: any) => d.key === 'dev_ux_versions');
     const devUxModeDoc = docs.find((d: any) => d.key === 'dev_ux_mode');
 
-    // Check primary_app_versions first
-    if (primaryAppVersionsDoc?.value) {
-      try {
-        const parsed = JSON.parse(primaryAppVersionsDoc.value);
-        if (parsed && typeof parsed.defaultMode === 'boolean') {
-          cachedDevUxMode = parsed.defaultMode;
-          cachedDevUxAt = now;
-          return parsed.defaultMode;
-        }
-        const versionList = Array.isArray(parsed) ? parsed : (parsed.versions || []);
-        const v1Match = versionList.find((v: any) => (v.version || '').toLowerCase() === 'v1');
-        if (v1Match && typeof v1Match.isDevMode === 'boolean') {
-          cachedDevUxMode = v1Match.isDevMode;
-          cachedDevUxAt = now;
-          return v1Match.isDevMode;
-        }
-      } catch {}
-    }
-
-    // Check dev_ux_versions map
+    // Parse dev_ux_versions map
     let versionMap: Record<string, boolean> = {};
     if (devUxVersionsDoc?.value) {
       try {
@@ -115,20 +96,64 @@ export async function getDevUxMode({ forceRefresh = false } = {}): Promise<boole
       } catch {}
     }
 
-    const globalDefault = devUxModeDoc
-      ? (devUxModeDoc.is_active !== false && (devUxModeDoc.value === 'true' || devUxModeDoc.value === true))
-      : false;
-
-    let isEnabled = globalDefault;
-    if (typeof versionMap['default'] === 'boolean') {
-      isEnabled = versionMap['default'];
-    } else if (typeof versionMap['v1'] === 'boolean') {
-      isEnabled = versionMap['v1'];
+    // Parse primary_app_versions list & defaultMode
+    let primaryVersionsList: any[] = [];
+    let primaryDefaultMode: boolean | null = null;
+    if (primaryAppVersionsDoc?.value) {
+      try {
+        const parsed = JSON.parse(primaryAppVersionsDoc.value);
+        if (typeof parsed?.defaultMode === 'boolean') {
+          primaryDefaultMode = parsed.defaultMode;
+        }
+        primaryVersionsList = Array.isArray(parsed) ? parsed : (parsed?.versions || []);
+      } catch {}
     }
 
-    cachedDevUxMode = isEnabled;
+    const targetVer = (version || 'web').toLowerCase().trim();
+
+    // 1. Explicit target version match in dev_ux_versions map
+    if (typeof versionMap[targetVer] === 'boolean') {
+      cachedDevUxMode = versionMap[targetVer];
+      cachedDevUxAt = now;
+      return versionMap[targetVer];
+    }
+
+    // 2. Explicit target version match in primary_app_versions list
+    const matchedPrimary = primaryVersionsList.find(
+      (v: any) => (v.version || '').toLowerCase().trim() === targetVer
+    );
+    if (matchedPrimary && typeof matchedPrimary.isDevMode === 'boolean') {
+      cachedDevUxMode = matchedPrimary.isDevMode;
+      cachedDevUxAt = now;
+      return matchedPrimary.isDevMode;
+    }
+
+    // 3. Global Master toggle (dev_ux_mode) set on Admin Dashboard Home / Profile
+    if (devUxModeDoc && devUxModeDoc.is_active !== false) {
+      const val = devUxModeDoc.value;
+      const isGlobalEnabled = val === 'true' || val === true;
+      cachedDevUxMode = isGlobalEnabled;
+      cachedDevUxAt = now;
+      return isGlobalEnabled;
+    }
+
+    // 4. Fallback: dev_ux_versions['default']
+    if (typeof versionMap['default'] === 'boolean') {
+      cachedDevUxMode = versionMap['default'];
+      cachedDevUxAt = now;
+      return versionMap['default'];
+    }
+
+    // 5. Fallback: primary_app_versions defaultMode
+    if (typeof primaryDefaultMode === 'boolean') {
+      cachedDevUxMode = primaryDefaultMode;
+      cachedDevUxAt = now;
+      return primaryDefaultMode;
+    }
+
+    cachedDevUxMode = false;
     cachedDevUxAt = now;
-    return isEnabled;
+    return false;
   } catch (error) {
     console.log('Unable to fetch Dev UX mode from Appwrite:', error);
     if (cachedDevUxMode !== null) return cachedDevUxMode;

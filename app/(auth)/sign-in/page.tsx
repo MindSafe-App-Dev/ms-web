@@ -11,7 +11,7 @@ import { useNotification } from '@/context/NotificationProvider';
 
 export default function SignInPage() {
     const router = useRouter();
-    const { setUser, setIsLogged } = useGlobalContext();
+    const { setUser, setIsLogged, devUxMode } = useGlobalContext();
     const { showSuccess, showError } = useNotification();
 
     const [form, setForm] = useState({ email: '', password: '' });
@@ -65,11 +65,17 @@ export default function SignInPage() {
         <div className="min-h-screen flex items-center justify-center px-4 py-8">
             <div className="w-full max-w-md">
                 {/* Header */}
-                <div className="text-center mb-10">
+                <div className="text-center mb-8">
                     <h1 className="text-3xl font-bold text-white mb-2">
                         Sign in with <span className="text-orange-400">Mind Safe</span>
                     </h1>
-                    <div className="w-32 h-1 gradient-primary mx-auto rounded-full" />
+                    <div className="w-32 h-1 gradient-primary mx-auto rounded-full mb-3" />
+                    {devUxMode && (
+                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-950/80 border border-purple-500/30 text-purple-300 text-xs font-semibold shadow-inner">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                            Parental Control Mode Active
+                        </div>
+                    )}
                 </div>
 
                 {/* Form */}
@@ -117,20 +123,20 @@ export default function SignInPage() {
                         </div>
                     </div>
 
+                    {/* Forgot Password Link */}
+                    <div className="flex justify-end">
+                        <Link href="/forgot-password" className="text-sm text-gray-400 hover:text-orange-400">
+                            Forgot password?
+                        </Link>
+                    </div>
+
                     {/* Submit Button */}
                     <button
                         type="submit"
                         disabled={isSubmitting}
-                        className="ms-btn ms-btn-primary w-full text-lg"
+                        className="ms-btn ms-btn-primary w-full"
                     >
-                        {isSubmitting ? (
-                            <div className="flex items-center justify-center gap-2">
-                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                Signing in...
-                            </div>
-                        ) : (
-                            'Sign In'
-                        )}
+                        {isSubmitting ? 'Signing In...' : 'Sign In'}
                     </button>
                 </form>
 
@@ -138,7 +144,7 @@ export default function SignInPage() {
                 <div className="flex items-center justify-center gap-2 mt-8">
                     <span className="text-gray-400">Don&apos;t have an account?</span>
                     <Link href="/sign-up" className="text-orange-400 font-semibold hover:underline">
-                        Signup
+                        {devUxMode ? 'Register as Parent or Child' : 'Signup'}
                     </Link>
                 </div>
             </div>
