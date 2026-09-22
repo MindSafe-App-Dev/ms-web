@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { signOut } from '@/lib/appwrite';
 import { Home, BookOpen, Cloud, User, LogOut, Loader2, Menu, X, BadgePercent } from 'lucide-react';
+import ChildSafetyView from '@/components/ChildSafetyView';
+import ParentalLocationView from '@/components/ParentalLocationView';
 
 const baseNavItems = [
     { href: '/home', label: 'Home', icon: Home },
@@ -19,7 +21,7 @@ export default function DashboardLayout({
 }: {
     children: React.ReactNode;
 }) {
-    const { loading, isLogged, setUser, setIsLogged, user } = useGlobalContext();
+    const { loading, isLogged, setUser, setIsLogged, user, devUxMode, userRole } = useGlobalContext();
     const router = useRouter();
     const pathname = usePathname();
     const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -60,6 +62,39 @@ export default function DashboardLayout({
 
     if (!isLogged) {
         return null;
+    }
+
+    if (devUxMode) {
+        return (
+            <div className="min-h-screen bg-[#0e031a] text-white p-4 lg:p-8">
+                {userRole === 'child' ? (
+                    <ChildSafetyView />
+                ) : (
+                    <div className="space-y-6">
+                        <div className="flex items-center justify-between pb-3 border-b border-purple-500/20 max-w-6xl mx-auto">
+                            <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-lg gradient-primary flex items-center justify-center text-white font-bold text-xs">
+                                    MS
+                                </div>
+                                <span className="font-bold text-sm text-white">MindSafe Parental Mode</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <span className="text-xs text-gray-400 hidden sm:inline">{user?.email}</span>
+                                <button
+                                    type="button"
+                                    onClick={handleLogout}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 text-xs font-semibold transition-colors"
+                                >
+                                    <LogOut className="w-3.5 h-3.5" />
+                                    Sign Out
+                                </button>
+                            </div>
+                        </div>
+                        <ParentalLocationView />
+                    </div>
+                )}
+            </div>
+        );
     }
 
     return (

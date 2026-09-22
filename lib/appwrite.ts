@@ -46,6 +46,9 @@ export interface User {
   username: string;
   avatar: string;
   isInitial?: boolean;
+  role?: 'parent' | 'child';
+  childId?: string;
+  parentId?: string;
 }
 
 export interface Child {
@@ -168,13 +171,52 @@ export function calculateDiscountedAmount(amount: number, coupon: Coupon | null)
   return { discountAmount, finalAmount };
 }
 
-export async function createUser(email: string, password: string, username: string): Promise<User> {
+export async function createUser(
+  email: string,
+  password: string,
+  username: string,
+  role: 'parent' | 'child' = 'parent',
+  childDetails: { childId?: string; parentId?: string } = {}
+): Promise<User> {
   try {
     const newAccount = await account.create(ID.unique(), email, password, username);
     if (!newAccount) throw new Error('Failed to create account');
 
     const avatarUrl = avatars.getInitials(username);
     await signIn(email, password);
+
+    const assignedRole = role === 'child' ? 'child' : 'parent';
+    const childId = childDetails?.childId || `CHILD-${Math.floor(100000 + Math.random() * 900000)}`;
+
+    try {
+      await account.updatePrefs({
+        role: assignedRole,
+        childId: assignedRole === 'child' ? childId : '',
+        parentId: childDetails?.parentId || '',
+      });
+    } catch (prefErr) {
+      console.log('Could not update account prefs:', prefErr);
+    }
+
+    if (assignedRole === 'child') {
+      try {
+        const activeServerUrl = await getActiveServerUrl().catch(() => '');
+        await databases.createDocument(
+          appwriteConfig.databaseId,
+          appwriteConfig.childCollectionId,
+          ID.unique(),
+          {
+            client_id: childDetails?.parentId || 'unpaired',
+            victime_name: `${username}|web_client`,
+            victim_id: childId,
+            is_Premium: false,
+            server_url: activeServerUrl || null,
+          }
+        );
+      } catch (childDocErr) {
+        console.log('Could not auto-create child collection document:', childDocErr);
+      }
+    }
 
     const newUser = await databases.createDocument(
       appwriteConfig.databaseId,
@@ -189,7 +231,12 @@ export async function createUser(email: string, password: string, username: stri
       }
     );
 
-    return newUser as unknown as User;
+    return {
+      ...(newUser as unknown as User),
+      role: assignedRole,
+      childId: assignedRole === 'child' ? childId : '',
+      parentId: childDetails?.parentId || '',
+    };
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : 'Registration failed');
   }
@@ -237,9 +284,64 @@ export async function getCurrentUser(): Promise<User | null> {
     );
 
     if (!currentUser.documents.length) return null;
-    return currentUser.documents[0] as unknown as User;
+    const doc = currentUser.documents[0] as unknown as User;
+    const prefs = (currentAccount as any).prefs || {};
+
+    return {
+      ...doc,
+      role: prefs.role || 'parent',
+      childId: prefs.childId || '',
+      parentId: prefs.parentId || '',
+    };
   } catch {
     return null;
+  }
+}
+
+export async function linkChildToParent(parentId: string, childVictimId: string, childName: string = ''): Promise<Child> {
+  if (!parentId || !childVictimId) {
+    throw new Error('Parent ID and Child ID are required.');
+  }
+
+  const cleanVictimId = childVictimId.trim();
+  try {
+    const existing = await databases.listDocuments(
+      appwriteConfig.databaseId,
+      appwriteConfig.childCollectionId,
+      [Query.equal('victim_id', cleanVictimId), Query.limit(1)]
+    );
+
+    if (existing.documents.length > 0) {
+      const doc = existing.documents[0];
+      const updated = await databases.updateDocument(
+        appwriteConfig.databaseId,
+        appwriteConfig.childCollectionId,
+        doc.$id,
+        {
+          client_id: parentId,
+          ...(childName ? { victime_name: childName } : {}),
+        }
+      );
+      return updated as unknown as Child;
+    } else {
+      const activeServerUrl = await getActiveServerUrl().catch(() => '');
+      const created = await databases.createDocument(
+        appwriteConfig.databaseId,
+        appwriteConfig.childCollectionId,
+        ID.unique(),
+        {
+          client_id: parentId,
+          victime_name: childName || 'Linked Child',
+          victim_id: cleanVictimId,
+          is_Premium: false,
+          server_url: activeServerUrl || null,
+        }
+      );
+      return created as unknown as Child;
+    }
+  } catch (error) {
+    console.error('linkChildToParent failed:', error);
+    throw error;
   }
 }
 

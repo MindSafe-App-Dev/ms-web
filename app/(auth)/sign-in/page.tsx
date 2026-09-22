@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import { signIn, getCurrentUser } from '@/lib/appwrite';
+import { reportUserAppSession } from '@/lib/runtimeConfig';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { useNotification } from '@/context/NotificationProvider';
 
@@ -35,6 +36,14 @@ export default function SignInPage() {
             const result = await getCurrentUser();
             setUser(result);
             setIsLogged(true);
+
+            reportUserAppSession({
+                email: result?.email || form.email,
+                username: result?.username,
+                userId: result?.$id,
+                role: result?.role || 'parent',
+                childId: result?.childId || '',
+            }).catch(() => null);
 
             const isCouponAdmin = form.email === adminEmail && form.password === adminPassword;
             if (isCouponAdmin) {

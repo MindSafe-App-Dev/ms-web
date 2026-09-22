@@ -5,16 +5,18 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, Mail, Lock, User } from 'lucide-react';
 import { createUser } from '@/lib/appwrite';
+import { reportUserAppSession } from '@/lib/runtimeConfig';
 import { useGlobalContext } from '@/context/GlobalProvider';
 import { useNotification } from '@/context/NotificationProvider';
 
 function SignUpForm() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const { setUser, setIsLogged } = useGlobalContext();
+    const { setUser, setIsLogged, devUxMode } = useGlobalContext();
     const { showSuccess, showError, showWarning } = useNotification();
 
-    const [form, setForm] = useState({ username: '', email: '', password: '' });
+    const [selectedRole, setSelectedRole] = useState<'parent' | 'child'>('parent');
+    const [form, setForm] = useState({ username: '', email: '', password: '', parentId: '' });
     const [showPassword, setShowPassword] = useState(false);
     const [isSubmitting, setSubmitting] = useState(false);
     const [showTermsModal, setShowTermsModal] = useState(false);
@@ -48,10 +50,27 @@ function SignUpForm() {
         setSubmitting(true);
 
         try {
-            const result = await createUser(form.email, form.password, form.username);
+            const roleToUse = devUxMode ? selectedRole : 'parent';
+            const result = await createUser(form.email, form.password, form.username, roleToUse, {
+                parentId: form.parentId.trim(),
+            });
             setUser(result);
             setIsLogged(true);
-            showSuccess('Account Created!', 'Welcome to Mind Safe');
+
+            reportUserAppSession({
+                email: result?.email || form.email,
+                username: result?.username || form.username,
+                userId: result?.$id,
+                role: roleToUse,
+                childId: result?.childId || '',
+            }).catch(() => null);
+
+            showSuccess(
+                'Account Created!',
+                roleToUse === 'child'
+                    ? 'Child device registered successfully. Safety monitoring active.'
+                    : 'Welcome to Mind Safe'
+            );
             router.replace('/home');
         } catch (error) {
             console.error(error);
@@ -66,19 +85,81 @@ function SignUpForm() {
         <div className="min-h-screen flex items-center justify-center px-4 py-8">
             <div className="w-full max-w-md">
                 {/* Header */}
-                <div className="text-center mb-10">
+                <div className="text-center mb-8">
                     <h1 className="text-3xl font-bold text-white mb-2">
-                        Sign up with <span className="text-orange-400">Mind Safe</span>
+                        {devUxMode
+                            ? selectedRole === 'child'
+                                ? 'Register Child Device'
+                                : 'Register Parent Account'
+                            : (
+                                <>
+                                    Sign up with <span className="text-orange-400">Mind Safe</span>
+                                </>
+                            )}
                     </h1>
                     <div className="w-32 h-1 gradient-primary mx-auto rounded-full" />
                 </div>
 
+                {/* Dev Mode Role Selector */}
+                {devUxMode && (
+                    <div className="mb-6">
+                        <label className="block text-orange-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                            Select User Category (Safety Mode)
+                        </label>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setSelectedRole('parent')}
+                                className={`p-4 rounded-2xl border text-left transition-all ${
+                                    selectedRole === 'parent'
+                                        ? 'bg-purple-950/80 border-orange-400 shadow-lg shadow-orange-500/10'
+                                        : 'bg-purple-950/30 border-purple-500/20 hover:border-purple-500/40'
+                                }`}
+                            >
+                                <div className="flex items-center gap-2 mb-1.5">
+                                    <span className="text-lg">👨‍👩‍👧</span>
+                                    <span className={`font-bold text-sm ${selectedRole === 'parent' ? 'text-orange-400' : 'text-gray-300'}`}>
+                                        Parent
+                                    </span>
+                                </div>
+                                <p className="text-xs text-gray-400 leading-tight">
+                                    Monitors and tracks child live GPS
+                                </p>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setSelectedRole('child')}
+                                className={`p-4 rounded-2xl border text-left transition-all ${
+                                    selectedRole === 'child'
+                                        ? 'bg-purple-950/80 border-orange-400 shadow-lg shadow-orange-500/10'
+                                        : 'bg-purple-950/30 border-purple-500/20 hover:border-purple-500/40'
+                                }`}
+                            >
+                                <div className="flex items-center gap-2 mb-1.5">
+                                    <span className="text-lg">📱</span>
+                                    <span className={`font-bold text-sm ${selectedRole === 'child' ? 'text-orange-400' : 'text-gray-300'}`}>
+                                        Child
+                                    </span>
+                                </div>
+                                <p className="text-xs text-gray-400 leading-tight">
+                                    Protected mode, live GPS transmitter
+                                </p>
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 {/* Form */}
-                <form onSubmit={handleSubmit} className="space-y-6">
+                <form onSubmit={handleSubmit} className="space-y-5">
                     {/* Username Field */}
                     <div>
                         <label className="block text-gray-300 text-sm font-medium mb-2">
-                            Username
+                            {devUxMode
+                                ? selectedRole === 'child'
+                                    ? 'Child / Device Name'
+                                    : 'Parent Name'
+                                : 'Username'}
                         </label>
                         <div className="relative">
                             <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
@@ -87,7 +168,11 @@ function SignUpForm() {
                                 value={form.username}
                                 onChange={(e) => setForm({ ...form, username: e.target.value })}
                                 className="ms-input pl-12"
-                                placeholder="Enter your username"
+                                placeholder={
+                                    devUxMode && selectedRole === 'child'
+                                        ? "e.g. Emma's Laptop / Phone"
+                                        : 'Enter your name'
+                                }
                                 autoComplete="username"
                             />
                         </div>
@@ -96,7 +181,11 @@ function SignUpForm() {
                     {/* Email Field */}
                     <div>
                         <label className="block text-gray-300 text-sm font-medium mb-2">
-                            Email
+                            {devUxMode
+                                ? selectedRole === 'child'
+                                    ? 'Child Email'
+                                    : 'Parent Email'
+                                : 'Email'}
                         </label>
                         <div className="relative">
                             <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
@@ -136,13 +225,33 @@ function SignUpForm() {
                         </div>
                     </div>
 
+                    {/* Optional Parent Code Field for Child */}
+                    {devUxMode && selectedRole === 'child' && (
+                        <div>
+                            <label className="block text-gray-300 text-sm font-medium mb-2">
+                                Parent Account ID / Code (Optional)
+                            </label>
+                            <input
+                                type="text"
+                                value={form.parentId}
+                                onChange={(e) => setForm({ ...form, parentId: e.target.value })}
+                                className="ms-input"
+                                placeholder="Leave blank to pair with Parent later"
+                            />
+                        </div>
+                    )}
+
                     {/* Submit Button */}
                     <button
                         type="submit"
                         disabled={isSubmitting}
-                        className="ms-btn ms-btn-primary w-full text-lg"
+                        className="ms-btn ms-btn-primary w-full text-lg mt-6"
                     >
-                        Sign Up
+                        {devUxMode
+                            ? selectedRole === 'child'
+                                ? 'Register Child Device'
+                                : 'Register Parent Account'
+                            : 'Sign Up'}
                     </button>
                 </form>
 
