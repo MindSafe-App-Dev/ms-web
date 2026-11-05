@@ -10,7 +10,8 @@ import { getAdminSetting } from '@/lib/appwrite';
 
 export const dynamic = 'force-dynamic';
 
-const SETTING_KEY = 'app_access_permitted_countries';
+const SETTING_KEY = 'advance_button_permitted_countries';
+const FALLBACK_KEY = 'app_access_permitted_countries';
 
 let cachedConfig: { config: CountryAccessConfig; at: number } | null = null;
 const CACHE_TTL_MS = 15000;
@@ -22,7 +23,10 @@ async function fetchAccessConfig(): Promise<CountryAccessConfig> {
   }
 
   try {
-    const doc = await getAdminSetting(SETTING_KEY);
+    let doc = await getAdminSetting(SETTING_KEY);
+    if (!doc?.value) {
+      doc = await getAdminSetting(FALLBACK_KEY);
+    }
     const config = parseCountryConfig(doc?.value);
     cachedConfig = { config, at: now };
     return config;
