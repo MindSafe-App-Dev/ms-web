@@ -3,6 +3,7 @@ import { Poppins } from "next/font/google";
 import "./globals.css";
 import GlobalProvider from "@/context/GlobalProvider";
 import NotificationProvider from "@/context/NotificationProvider";
+import CountryAccessGuard from "@/components/CountryAccessGuard";
 
 const poppins = Poppins({
   subsets: ["latin"],
@@ -28,9 +29,11 @@ export default function RootLayout({
       <body className={`${poppins.className} antialiased`}>
         <GlobalProvider>
           <NotificationProvider>
-            <div className="min-h-screen bg-pattern">
-              {children}
-            </div>
+            <CountryAccessGuard>
+              <div className="min-h-screen bg-pattern">
+                {children}
+              </div>
+            </CountryAccessGuard>
           </NotificationProvider>
         </GlobalProvider>
       </body>
