@@ -14,10 +14,6 @@ const nextConfig: any = {
     // Dangerously allow production builds to complete even with type errors
     ignoreBuildErrors: true,
   },
-  eslint: {
-    // Disable ESLint during builds as well
-    ignoreDuringBuilds: true,
-  },
   async headers() {
     return [
       {
